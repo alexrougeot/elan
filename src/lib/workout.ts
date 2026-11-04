@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { getData, getDoc, putDoc, uid } from './store';
-import { dayKey, weekday } from './dates';
-import { CATALOG, type Program, type ProgramDay } from './program';
+import { dayKey, daysBetween, weekday } from './dates';
+import { CATALOG, weeklyCircuit, type Program, type ProgramDay } from './program';
 import { bestE1rm, e1rm, isDeloadWeek, prepareExercise, sessions, type Session } from './coach';
 import { beep } from './device';
 
@@ -40,7 +40,14 @@ export async function startSession(day: ProgramDay, program: Program) {
     subtitle: day.subtitle,
     startedAt: new Date().toISOString(),
     deload,
-    exercises: day.exercises.map((p) => prepareExercise(p, deload, id)),
+    exercises: day.exercises.map((p) => {
+      if (!p.circuit) return prepareExercise(p, deload, id);
+      // le circuit abdos change chaque semaine
+      const week = Math.max(0, Math.floor(daysBetween(program.startDate, dayKey()) / 7));
+      const dayIndex = Math.max(0, program.days.findIndex((d) => d.id === day.id));
+      const c = weeklyCircuit(p.circuit, week, dayIndex, program.days.length, deload);
+      return prepareExercise({ ...p, circuit: c }, deload, id);
+    }),
   };
   await putDoc(id, 'session', s);
   return id;

@@ -823,7 +823,9 @@ function CircuitCard({ id, ex, isCurrent, onStart }: { id: string; ex: SessionEx
           <span className={'muscle ' + (isCurrent ? '' : 'tint-violet')} style={isCurrent ? { background: 'rgba(255,255,255,0.16)', color: '#fff' } : undefined}>
             Abdos
           </span>
-          <span style={{ fontSize: 19, fontWeight: 700 }}>Circuit abdos · {minutes} min</span>
+          <span style={{ fontSize: 19, fontWeight: 700 }}>
+            Circuit abdos{c.number ? ` n°${c.number}` : ''} · {minutes} min
+          </span>
           <span className={'small ' + (isCurrent ? 'on-hero-2' : 'muted')}>
             {c.rounds} tours · {c.work} s d’effort, {c.rest} s de repos
           </span>

@@ -82,7 +82,7 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
       sets: Array.from({ length: c.rounds }, () => ({ w: 0, r: c.keys.length, done: false })),
       tip: {
         kind: 'same',
-        text: `${c.rounds} tours de ${c.keys.length} exercices : ${c.work} s à fond, ${c.rest} s de repos. Le minuteur s’occupe de tout. Trop facile ? Prends la variante plus dure.`,
+        text: `Circuit de la semaine : ${c.rounds} tours de ${c.keys.length} exercices, ${c.work} s à fond et ${c.rest} s de repos.${c.work > 40 ? ' Le temps d’effort a monté : tiens bon jusqu’au bip.' : ''} Le minuteur s’occupe de tout.`,
       },
     };
   }

@@ -112,11 +112,18 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('ab_wheel', 'Roue abdominale', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
     ex('v_up', 'V-ups', 'Abdos', 'poids du corps', false, false, ['crunch'], { timed: true, increment: 0 }),
     ex('reverse_crunch', 'Crunch inversé', 'Abdos', 'poids du corps', false, false, ['leg_raise'], { timed: true, increment: 0 }),
+    ex('flutter_kick', 'Battements de jambes', 'Abdos', 'poids du corps', false, false, ['scissor'], { timed: true, increment: 0 }),
+    ex('scissor', 'Ciseaux', 'Abdos', 'poids du corps', false, false, ['flutter_kick'], { timed: true, increment: 0 }),
+    ex('toe_touch', 'Crunch mains-pieds', 'Abdos', 'poids du corps', false, false, ['crunch'], { timed: true, increment: 0 }),
+    ex('heel_touch', 'Touchers de talons', 'Abdos', 'poids du corps', false, false, ['russian_twist'], { timed: true, increment: 0 }),
+    ex('plank_shoulder_tap', 'Planche, touche épaule', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
+    ex('windshield', 'Essuie-glaces', 'Abdos', 'poids du corps', false, false, ['russian_twist'], { timed: true, increment: 0 }),
+    ex('bear_hold', 'Position de l’ours', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
     ex('abs_circuit', 'Abdos · 10 min', 'Abdos', 'poids du corps', false, false, [], { timed: true, increment: 0, circuit: true }),
   ].map((e) => [e.key, e])
 );
 
-export type Circuit = { keys: string[]; work: number; rest: number; rounds: number };
+export type Circuit = { keys: string[]; work: number; rest: number; rounds: number; number?: number };
 export type PlannedExercise = {
   key: string;
   sets: number;
@@ -171,6 +178,33 @@ export const ABS: Record<string, string[]> = {
   c: ['hanging_leg_raise', 'bicycle_crunch', 'ab_wheel', 'v_up', 'plank'],
   d: ['mountain_climber', 'side_plank', 'russian_twist', 'reverse_crunch', 'plank'],
 };
+
+/** 12 circuits qui tournent : un différent à chaque séance, et la semaine suivante change tout */
+export const ABS_POOL: string[][] = [
+  ['crunch', 'leg_raise', 'plank', 'russian_twist', 'mountain_climber'],
+  ['side_plank', 'dead_bug', 'hollow_hold', 'commando_plank', 'side_plank'],
+  ['hanging_leg_raise', 'bicycle_crunch', 'ab_wheel', 'v_up', 'plank'],
+  ['mountain_climber', 'side_plank', 'russian_twist', 'reverse_crunch', 'plank'],
+  ['flutter_kick', 'toe_touch', 'plank_shoulder_tap', 'heel_touch', 'hollow_hold'],
+  ['windshield', 'crunch', 'side_plank', 'scissor', 'bear_hold'],
+  ['v_up', 'mountain_climber', 'dead_bug', 'bicycle_crunch', 'side_plank'],
+  ['reverse_crunch', 'heel_touch', 'ab_wheel', 'flutter_kick', 'commando_plank'],
+  ['hollow_hold', 'russian_twist', 'plank_shoulder_tap', 'leg_raise', 'side_plank'],
+  ['toe_touch', 'windshield', 'bear_hold', 'scissor', 'plank'],
+  ['hanging_leg_raise', 'side_plank', 'mountain_climber', 'heel_touch', 'hollow_hold'],
+  ['bicycle_crunch', 'dead_bug', 'commando_plank', 'reverse_crunch', 'side_plank'],
+];
+
+/**
+ * Circuit de la séance : il change chaque semaine, et le temps d'effort monte par paliers
+ * (40/20 → 45/15 → 50/10), toujours 10 minutes. Semaine légère : 30/30.
+ */
+export function weeklyCircuit(base: Circuit, week: number, dayIndex: number, daysPerWeek: number, deload: boolean): Circuit & { number: number } {
+  const n = ((week * Math.max(1, daysPerWeek) + dayIndex) % ABS_POOL.length + ABS_POOL.length) % ABS_POOL.length;
+  const step = Math.floor((((week % 6) + 6) % 6) / 2);
+  const [work, rest] = deload ? [30, 30] : ([[40, 20], [45, 15], [50, 10]] as const)[step];
+  return { ...base, keys: ABS_POOL[n], work, rest, number: n + 1 };
+}
 
 export const abs = (keys: string[]): PlannedExercise => ({
   key: 'abs_circuit',
