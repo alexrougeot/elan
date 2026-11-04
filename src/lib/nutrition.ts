@@ -18,7 +18,17 @@ export type Profile = {
 
 export type Meal = { name: string; time: string; share: { p: number; g: number; l: number }; hint?: string };
 export type Adjustment = { date: string; week: string; delta: number; reason: string; undone?: boolean };
-export type Targets = { kcal: number; p: number; g: number; l: number; meals: Meal[]; mode: 'auto' | 'manuel'; history: Adjustment[] };
+export type Targets = {
+  kcal: number;
+  p: number;
+  g: number;
+  l: number;
+  meals: Meal[];
+  mode: 'auto' | 'manuel';
+  history: Adjustment[];
+  /** hydratation : objectif et heures des rappels */
+  water?: { goalMl: number; reminders: string[] };
+};
 
 export type Macros = { k: number; p: number; g: number; l: number };
 export type FoodEntry = {

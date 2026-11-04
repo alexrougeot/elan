@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { getData, getDoc, putDoc, uid } from './store';
 import { dayKey, daysBetween, weekday } from './dates';
 import { CATALOG, weeklyCircuit, type Program, type ProgramDay } from './program';
+import { focusMuscles, groupOf } from './analysis';
 import { bestE1rm, e1rm, isDeloadWeek, prepareExercise, sessions, type Session } from './coach';
 import { beep } from './device';
 
@@ -30,9 +31,50 @@ export function sessionToday(dayId?: string) {
   return sessions().find((x) => x.data.date === today && (!dayId || x.data.dayId === dayId));
 }
 
-export async function startSession(day: ProgramDay, program: Program) {
+/** Forme du jour : 1 (épuisé) à 5 (au top) */
+export type Readiness = 1 | 2 | 3 | 4 | 5;
+
+export async function startSession(day: ProgramDay, program: Program, readiness: Readiness = 3) {
   const id = 'session:' + uid();
   const deload = isDeloadWeek(program);
+  const focus = focusMuscles();
+  const focused = new Set<string>();
+  let pushed = false;
+  const exercises = day.exercises.map((p) => {
+    if (p.circuit) {
+      // le circuit abdos change chaque semaine
+      const week = Math.max(0, Math.floor(daysBetween(program.startDate, dayKey()) / 7));
+      const dayIndex = Math.max(0, program.days.findIndex((d) => d.id === day.id));
+      const c = weeklyCircuit(p.circuit, week, dayIndex, program.days.length, deload);
+      return prepareExercise({ ...p, circuit: c }, deload, id);
+    }
+    const def = CATALOG[p.key];
+    const g = groupOf(p.key);
+    // muscle en retard : +1 série sur son premier exercice de la séance
+    const boost = !deload && readiness >= 3 && g && focus.includes(g) && !focused.has(g);
+    if (boost && g) focused.add(g);
+    const ex = prepareExercise(boost ? { ...p, sets: p.sets + 1 } : p, deload, id);
+    if (boost) ex.tip = { ...ex.tip, text: `Focus ${g?.toLowerCase()} : ils progressent moins vite que le reste, alors +1 série cette semaine. ` + ex.tip.text };
+
+    // forme du jour
+    const step = def && def.increment >= 2.5 ? 2.5 : 1;
+    const round = (x: number) => Math.max(0, Math.round(x / step) * step);
+    if (!def?.timed && ex.sets.some((x) => x.w > 0)) {
+      if (readiness === 1) {
+        ex.sets = ex.sets.slice(0, Math.max(2, ex.sets.length - 1)).map((x) => ({ ...x, w: round(x.w * 0.9) }));
+        ex.tip = { kind: 'deload', text: 'Grosse fatigue aujourd’hui : une série de moins et −10 %. Le but, c’est de garder le rythme sans te cramer.' };
+      } else if (readiness === 2) {
+        ex.sets = ex.sets.map((x) => ({ ...x, w: round(x.w * 0.95) }));
+        ex.tip = { ...ex.tip, text: 'Un peu fatigué : −5 % sur les charges. ' + ex.tip.text };
+      } else if (readiness === 5 && !pushed && def?.compound && ex.tip.kind !== 'down' && ex.tip.kind !== 'new') {
+        pushed = true;
+        const inc = def.increment || 2.5;
+        ex.sets = ex.sets.map((x) => ({ ...x, w: round(x.w + inc) }));
+        ex.tip = { kind: 'up', text: `Tu es au top : on tente +${inc.toLocaleString('fr-FR')} kg sur ce premier gros exercice. Si ça passe, c’est gagné pour la suite.` };
+      }
+    }
+    return ex;
+  });
   const s: Session = {
     date: dayKey(),
     dayId: day.id,
@@ -40,17 +82,30 @@ export async function startSession(day: ProgramDay, program: Program) {
     subtitle: day.subtitle,
     startedAt: new Date().toISOString(),
     deload,
-    exercises: day.exercises.map((p) => {
-      if (!p.circuit) return prepareExercise(p, deload, id);
-      // le circuit abdos change chaque semaine
-      const week = Math.max(0, Math.floor(daysBetween(program.startDate, dayKey()) / 7));
-      const dayIndex = Math.max(0, program.days.findIndex((d) => d.id === day.id));
-      const c = weeklyCircuit(p.circuit, week, dayIndex, program.days.length, deload);
-      return prepareExercise({ ...p, circuit: c }, deload, id);
-    }),
+    readiness,
+    exercises,
   };
   await putDoc(id, 'session', s);
   return id;
+}
+
+/** Séries d'échauffement calculées sur la charge du jour */
+export function warmupsFor(key: string, work: number, bar = 20): { w: number; r: number }[] {
+  const def = CATALOG[key];
+  if (!def || def.timed || !def.compound || work <= 0) return [];
+  if (!['barre', 'machine', 'haltères'].includes(def.equipment)) return [];
+  const barbell = def.equipment === 'barre';
+  const step = barbell || def.equipment === 'machine' ? 2.5 : 1;
+  const round = (x: number) => Math.round(x / step) * step;
+  const floor = barbell ? bar : step;
+  const plan: [number, number][] = work >= 60 ? [[0.4, 8], [0.6, 5], [0.8, 3]] : work >= 35 ? [[0.5, 8], [0.75, 4]] : [[0.6, 8]];
+  const out: { w: number; r: number }[] = [];
+  for (const [pct, r] of plan) {
+    const w = Math.max(floor, round(work * pct));
+    if (w < work && !out.some((o) => o.w === w)) out.push({ w, r });
+  }
+  if (barbell && out.length && out[0].w > bar && work >= 60) out.unshift({ w: bar, r: 10 });
+  return out.slice(0, 4);
 }
 
 export async function updateSession(id: string, fn: (s: Session) => Session) {

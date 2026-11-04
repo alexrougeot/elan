@@ -6,6 +6,7 @@ import { upgradedProgram, type Program } from './lib/program';
 import { startSyncLoop, syncNow } from './lib/sync';
 import type { Profile } from './lib/nutrition';
 import { Icon, LogoMark, Toasts, showToast } from './components/ui';
+import { RunHost } from './screens/Runs';
 import AuthScreen from './screens/Auth';
 import Onboarding from './screens/Onboarding';
 import Today from './screens/Today';
@@ -162,6 +163,7 @@ function Shell() {
       </nav>
 
       <Settings open={settings} onClose={() => setSettings(false)} />
+      <RunHost />
       <Toasts />
     </div>
   );

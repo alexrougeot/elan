@@ -4,10 +4,13 @@ import { addDays, dayKey, daysBetween, fmtKg, monthYear, parseDay, shortDate, we
 import { avg7, currentWeight, eta, getTargets, targetRate, undoAdjustment, weekAvg, weighIns, type Profile } from '../lib/nutrition';
 import { e1rm, sessions } from '../lib/coach';
 import { CATALOG, exName } from '../lib/program';
+import { focusMuscles, GROUPS, progressByMuscle, weeklySets } from '../lib/analysis';
 import { compressImage, haptic } from '../lib/device';
 import { HeroLeaves, Icon, Sheet, showToast } from '../components/ui';
 import WeighInSheet from '../components/WeighIn';
 import WeeklyReview from '../components/WeeklyReview';
+import { activities, circuitScore, durationSec, paceSec, paceText, runs } from '../lib/activity';
+import { fetchRun, openRun, PaceTrend } from './Runs';
 
 type Measure = { date: string; waist?: number; hips?: number; chest?: number; arm?: number; thigh?: number; photo?: string };
 const MEASURES: { key: keyof Measure; label: string }[] = [
@@ -20,7 +23,7 @@ const MEASURES: { key: keyof Measure; label: string }[] = [
 
 export default function Progress() {
   useStoreVersion();
-  const [tab, setTab] = useState<'poids' | 'force' | 'corps'>('poids');
+  const [tab, setTab] = useState<'poids' | 'force' | 'cardio' | 'corps'>('poids');
   const [review, setReview] = useState(false);
 
   return (
@@ -39,12 +42,16 @@ export default function Progress() {
         <button aria-pressed={tab === 'force'} onClick={() => setTab('force')}>
           Force
         </button>
+        <button aria-pressed={tab === 'cardio'} onClick={() => setTab('cardio')}>
+          Cardio
+        </button>
         <button aria-pressed={tab === 'corps'} onClick={() => setTab('corps')}>
           Corps
         </button>
       </div>
       {tab === 'poids' && <WeightView />}
       {tab === 'force' && <StrengthView />}
+      {tab === 'cardio' && <CardioView />}
       {tab === 'corps' && <BodyView />}
       <WeeklyReview open={review} onClose={() => setReview(false)} />
     </main>
@@ -289,15 +296,20 @@ function StrengthView() {
     return (byKey.get(b)!.length ?? 0) - (byKey.get(a)!.length ?? 0);
   });
 
+  const volume = <MuscleVolume />;
   if (keys.length === 0)
     return (
+      <>
+      {volume}
       <div className="card empty">
         Tes max estimés apparaîtront après ta première séance. Pas besoin de tester ton max : Élan le calcule à partir de tes séries.
       </div>
+      </>
     );
 
   return (
     <>
+      {volume}
       <p className="small muted" style={{ margin: '0 4px' }}>
         Max estimé = charge × (1 + reps ÷ 30), calculé sur ta meilleure série, sans faire de vrai max.
       </p>
@@ -396,6 +408,8 @@ function BodyView() {
         </section>
       )}
 
+      {photos.length >= 2 && <BeforeAfter photos={photos} />}
+
       {photos.length > 0 && (
         <section className="card col" style={{ gap: 10 }}>
           <h2 className="h2">Photos</h2>
@@ -414,6 +428,94 @@ function BodyView() {
 
       <MeasureSheet open={open} onClose={() => setOpen(false)} />
     </>
+  );
+}
+
+/** Comparateur avant / après : on fait glisser la séparation entre les deux photos */
+function BeforeAfter({ photos }: { photos: Measure[] }) {
+  // photos : de la plus récente à la plus ancienne
+  const [a, setA] = useState(photos[photos.length - 1].date);
+  const [b, setB] = useState(photos[0].date);
+  const [pos, setPos] = useState(50);
+  const before = photos.find((p) => p.date === a) ?? photos[photos.length - 1];
+  const after = photos.find((p) => p.date === b) ?? photos[0];
+  const list = weighIns();
+  const kgA = avg7(before.date, list);
+  const kgB = avg7(after.date, list);
+  const days = Math.abs(daysBetween(before.date, after.date));
+
+  function move(e: React.PointerEvent<HTMLDivElement>) {
+    const r = e.currentTarget.getBoundingClientRect();
+    setPos(Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100)));
+  }
+
+  return (
+    <section className="card col" style={{ gap: 12 }}>
+      <div className="row">
+        <h2 className="h2 grow">Avant / après</h2>
+        <span className="small muted">{days >= 7 ? `${Math.round(days / 7)} semaine${days >= 14 ? 's' : ''} d’écart` : `${days} jour${days > 1 ? 's' : ''} d’écart`}</span>
+      </div>
+      <div
+        className="compare"
+        style={{ '--pos': `${pos}%` } as React.CSSProperties}
+        role="slider"
+        tabIndex={0}
+        aria-label="Séparation entre la photo d’avant et celle d’après"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(pos)}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          move(e);
+        }}
+        onPointerMove={(e) => {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) move(e);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft') setPos((p) => Math.max(0, p - 5));
+          if (e.key === 'ArrowRight') setPos((p) => Math.min(100, p + 5));
+        }}
+      >
+        <img src={before.photo} alt={`Avant, le ${shortDate(before.date)}`} draggable={false} />
+        <img src={after.photo} className="compare-after" alt={`Après, le ${shortDate(after.date)}`} draggable={false} />
+        <span className="compare-line" aria-hidden />
+        <span className="compare-tag" style={{ left: 10 }}>
+          {shortDate(before.date)}
+          {kgA !== undefined ? ` · ${fmtKg(kgA)} kg` : ''}
+        </span>
+        <span className="compare-tag" style={{ right: 10 }}>
+          {shortDate(after.date)}
+          {kgB !== undefined ? ` · ${fmtKg(kgB)} kg` : ''}
+        </span>
+      </div>
+      <div className="fields-2">
+        <label className="field">
+          <span>Avant</span>
+          <select value={before.date} onChange={(e) => setA(e.target.value)}>
+            {photos.map((p) => (
+              <option key={p.date} value={p.date}>
+                {shortDate(p.date)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Après</span>
+          <select value={after.date} onChange={(e) => setB(e.target.value)}>
+            {photos.map((p) => (
+              <option key={p.date} value={p.date}>
+                {shortDate(p.date)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {kgA !== undefined && kgB !== undefined && (
+        <p className="small muted" style={{ margin: 0 }}>
+          {(kgB - kgA).toLocaleString('fr-FR', { maximumFractionDigits: 1, signDisplay: 'always' })} kg entre les deux photos (moyenne de la semaine). Même lumière, même pose et même heure : c’est ce qui rend la comparaison parlante.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -485,5 +587,214 @@ function MeasureSheet({ open, onClose }: { open: boolean; onClose: () => void })
         Enregistrer
       </button>
     </Sheet>
+  );
+}
+
+function MuscleVolume() {
+  const [now, before] = weeklySets(2);
+  const focus = focusMuscles();
+  const prog = progressByMuscle();
+  const max = Math.max(12, ...GROUPS.map((g) => now.sets[g] ?? 0));
+  const any = GROUPS.some((g) => (now.sets[g] ?? 0) + (before.sets[g] ?? 0) > 0);
+  return (
+    <section className="card col" style={{ gap: 12 }}>
+      <div className="row between">
+        <h2 className="h2">Séries par muscle</h2>
+        <span className="tiny muted">cette semaine</span>
+      </div>
+      {focus.length > 0 ? (
+        <div className="row small" style={{ gap: 8, background: 'var(--violet-tint)', color: 'var(--violet-ink)', padding: '10px 12px', borderRadius: 14, fontWeight: 600 }}>
+          <Icon name="flag" size={18} />
+          Focus : {focus.join(' et ').toLowerCase()}. Ils progressent moins vite, Élan leur ajoute une série.
+        </div>
+      ) : (
+        <span className="tiny muted">
+          {prog.span < 21 ? 'Après 3 semaines de séances, Élan repère les muscles qui progressent moins et leur ajoute du travail.' : 'Tous tes muscles progressent bien : pas de focus particulier.'}
+        </span>
+      )}
+      {!any ? (
+        <div className="empty">Les séries apparaîtront ici après ta première séance.</div>
+      ) : (
+        <div className="col" style={{ gap: 8 }}>
+          {GROUPS.map((g) => {
+            const n = now.sets[g] ?? 0;
+            const b = before.sets[g] ?? 0;
+            const p = prog.result.find((r) => r.group === g);
+            return (
+              <div key={g} className="row" style={{ gap: 10 }}>
+                <span className="small" style={{ width: 86, fontWeight: 600 }}>
+                  {g}
+                </span>
+                <div className="grow bar" style={{ height: 8 }}>
+                  <div style={{ width: (n / max) * 100 + '%', background: focus.includes(g) ? 'var(--violet)' : 'var(--brand)' }} />
+                </div>
+                <span className="small" style={{ width: 28, textAlign: 'right', fontWeight: 700 }}>
+                  {n}
+                </span>
+                <span className="tiny muted" style={{ width: 62, textAlign: 'right' }}>
+                  {p ? `${p.pct >= 0 ? '+' : ''}${p.pct.toFixed(0)} % force` : b ? `avant ${b}` : ''}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------- Cardio : course et séances type Hyrox ----------------
+function CardioView() {
+  const all = runs();
+  const today = dayKey();
+  const monthStart = today.slice(0, 8) + '01';
+  const month = all.filter((r) => r.data.date >= monthStart);
+  const monthKm = month.reduce((x, r) => x + (r.data.km ?? 0), 0);
+  const monthPace = month.filter((r) => r.data.km).reduce((x, r) => x + durationSec(r.data), 0) / (monthKm || 1);
+  const trend = all
+    .filter((r) => (r.data.km ?? 0) >= 2)
+    .slice(0, 16)
+    .reverse()
+    .map((r) => ({ id: r.id, date: r.data.date, pace: paceSec(r.data) }));
+  const monday = weekStart(today);
+  const weeks = Array.from({ length: 8 }, (_, i) => {
+    const mon = addDays(monday, -7 * (7 - i));
+    const km = all.filter((r) => r.data.date >= mon && r.data.date <= addDays(mon, 6)).reduce((x, r) => x + (r.data.km ?? 0), 0);
+    return { mon, km };
+  });
+  const maxKm = Math.max(5, ...weeks.map((w) => w.km));
+
+  // records
+  const longest = [...all].sort((a, b) => (b.data.km ?? 0) - (a.data.km ?? 0))[0];
+  const fastest = all.filter((r) => (r.data.km ?? 0) >= 3).sort((a, b) => paceSec(a.data) - paceSec(b.data))[0];
+  let best5: { sec: number; id: string } | null = null;
+  for (const r of all) {
+    const sp = r.data.kmSplits;
+    if (sp && sp.length >= 5) {
+      for (let i = 0; i + 5 <= sp.length; i++) {
+        const t = sp.slice(i, i + 5).reduce((x, y) => x + y, 0);
+        if (!best5 || t < best5.sec) best5 = { sec: t, id: r.id };
+      }
+    } else if ((r.data.km ?? 0) >= 5) {
+      const t = paceSec(r.data) * 5;
+      if (!best5 || t < best5.sec) best5 = { sec: t, id: r.id };
+    }
+  }
+  const circuits = activities()
+    .filter((a) => a.data.type === 'circuit')
+    .slice(0, 6);
+
+  if (all.length === 0 && circuits.length === 0)
+    return (
+      <div className="card col" style={{ gap: 12 }}>
+        <span className="tile tint-sky">
+          <Icon name="run" />
+        </span>
+        <span style={{ fontWeight: 700 }}>Tes courses arriveront ici</span>
+        <span className="small muted" style={{ lineHeight: 1.5 }}>
+          Allure, kilomètres par semaine, records : dès ta première course récupérée de ta montre (ou notée à la main), tu vois ta progression.
+        </span>
+        <button className="btn soft press" onClick={fetchRun}>
+          <Icon name="run" size={19} />
+          Récupérer ma course
+        </button>
+      </div>
+    );
+
+  const rec = (label: string, value: string, sub: string, id?: string) => (
+    <button className="list-row press" style={{ border: 'none', background: 'none', width: '100%', textAlign: 'left' }} onClick={id ? () => openRun(id) : undefined}>
+      <span className="grow col" style={{ gap: 1 }}>
+        <span className="small muted">{label}</span>
+        <span style={{ fontWeight: 700, fontSize: 18 }}>{value}</span>
+      </span>
+      <span className="small muted">{sub}</span>
+    </button>
+  );
+
+  return (
+    <>
+      <section className="hero col" style={{ gap: 10 }}>
+        <HeroLeaves />
+        <span className="hero-chip" style={{ alignSelf: 'flex-start' }}>
+          <Icon name="run" size={15} />
+          Course · {new Date().toLocaleDateString('fr-FR', { month: 'long' })}
+        </span>
+        <span className="big-num" style={{ fontSize: 44 }}>
+          {monthKm.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km
+        </span>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <span className="hero-chip">
+            {month.length} sortie{month.length > 1 ? 's' : ''}
+          </span>
+          {monthKm > 0 && <span className="hero-chip">allure moyenne {paceText(monthPace)}</span>}
+        </div>
+      </section>
+
+      {trend.length >= 2 && <PaceTrend list={trend} tall />}
+
+      <section className="card col" style={{ gap: 10 }}>
+        <div className="row between">
+          <span style={{ fontWeight: 700 }}>Kilomètres par semaine</span>
+          <span className="small muted">8 semaines</span>
+        </div>
+        <div className="row" style={{ alignItems: 'flex-end', gap: 6, height: 120 }}>
+          {weeks.map((w, i) => (
+            <div key={w.mon} className="col grow" style={{ alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
+              <span className="tiny" style={{ fontWeight: 650, color: i === 7 ? 'var(--brand-ink)' : 'var(--ink2)' }}>
+                {w.km ? w.km.toLocaleString('fr-FR', { maximumFractionDigits: 0 }) : ''}
+              </span>
+              <span style={{ width: '100%', maxWidth: 30, height: `${Math.max(3, (w.km / maxKm) * 82)}%`, borderRadius: 7, background: i === 7 ? 'var(--brand)' : w.km ? 'color-mix(in srgb, var(--brand) 45%, transparent)' : 'var(--line2)' }} />
+              <span className="tiny muted">{parseDay(w.mon).getDate()}/{parseDay(w.mon).getMonth() + 1}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {all.length > 0 && (
+        <section className="card tight">
+          {longest && rec('Plus longue sortie', `${(longest.data.km ?? 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km`, shortDate(longest.data.date), longest.id)}
+          {fastest && (
+            <>
+              <div className="divider" />
+              {rec('Meilleure allure (3 km et plus)', paceText(paceSec(fastest.data)), shortDate(fastest.data.date), fastest.id)}
+            </>
+          )}
+          {best5 && (
+            <>
+              <div className="divider" />
+              {rec('Meilleur 5 km', `${Math.floor(best5.sec / 60)}:${String(Math.round(best5.sec % 60)).padStart(2, '0')}`, 'estimé sur tes km', best5.id)}
+            </>
+          )}
+        </section>
+      )}
+
+      {circuits.length > 0 && (
+        <>
+          <div className="section-head">
+            <h2 className="h2">Séances type Hyrox</h2>
+          </div>
+          <div className="card tight">
+            {circuits.map((c, i) => (
+              <div key={c.id}>
+                <div className="list-row">
+                  <span className="tile sm tint-orange">
+                    <Icon name="bolt" size={18} />
+                  </span>
+                  <div className="grow col" style={{ gap: 2 }}>
+                    <span style={{ fontWeight: 600 }}>{c.data.plan?.name ?? 'Séance'}</span>
+                    <span className="small muted">
+                      {shortDate(c.data.date)}
+                      {c.data.duo ? ' · à deux' : ''}
+                    </span>
+                  </div>
+                  <span style={{ fontWeight: 700 }}>{circuitScore(c.data)}</span>
+                </div>
+                {i < circuits.length - 1 && <div className="divider" />}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
   );
 }

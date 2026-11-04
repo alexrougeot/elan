@@ -105,7 +105,7 @@ function MainPage({ go }: { go: (p: 'profile' | 'nutrition' | 'program' | 'watch
         <div className="divider" />
         <Row icon="dumbbell" title="Programme" sub={program ? (program.days.length ? program.days.map((d) => WEEKDAYS[d.weekday].slice(0, 3).toLowerCase()).join(', ') + ` · ${program.days.length} séance${program.days.length > 1 ? 's' : ''}` : 'Aucune séance') : ''} onClick={() => go('program')} />
         <div className="divider" />
-        <Row icon="timer" title="Montre et Santé" sub={getLink() ? 'Apple Watch ou Garmin reliée' : 'Récupère calories, durée et cœur'} onClick={() => go('watch')} />
+        <Row icon="timer" title="Montre et Santé" sub={getLink() ? 'Apple Watch ou Garmin reliée' : 'Courses avec parcours, calories et cœur'} onClick={() => go('watch')} />
       </div>
 
       <div className="card col" style={{ gap: 4, background: 'var(--card2)', boxShadow: 'none' }}>
@@ -701,7 +701,7 @@ function WatchPage() {
   return (
     <>
       <p className="small muted" style={{ margin: 0, lineHeight: 1.5 }}>
-        Ton Apple Watch et ta Garmin enregistrent tes séances dans l’app Santé de l’iPhone. Un raccourci iPhone lit les calories et le cœur de ta séance et les envoie à Élan, qui les range avec la séance du jour.
+        Ta montre enregistre tout dans l’app Santé de l’iPhone. Une app passerelle envoie chaque entraînement à Élan : tes courses arrivent avec le parcours, l’allure et le cœur, et tes séances de muscu avec leurs calories.
       </p>
 
       {!link ? (
@@ -725,8 +725,26 @@ function WatchPage() {
       )}
 
       <div className="section-head">
-        <h2 className="h2">Créer le raccourci (une seule fois)</h2>
+        <h2 className="h2">Health Auto Export (recommandé)</h2>
       </div>
+      <div className="col" style={{ gap: 12 }}>
+        {step(1, <>Installe <b>Health Auto Export</b> depuis l’App Store. L’envoi automatique demande la version Premium (achat unique, ou abonnement). Il y a un essai gratuit de 7 jours pour tester.</>)}
+        {step(2, <>Au premier lancement, autorise l’accès à Santé, au moins : <b>entraînements</b>, <b>parcours d’entraînement</b>, <b>fréquence cardiaque</b>, <b>énergie active</b> et <b>distance</b>.</>)}
+        {step(3, <>Ouvre l’onglet <b>Automations</b> et crée une automatisation de type <b>REST API</b>.</>)}
+        {step(4, <>Dans <b>URL</b>, colle ton adresse personnelle (au-dessus).</>)}
+        {step(5, <>Type de données : <b>Workouts</b> (entraînements). Active l’option qui inclut le <b>parcours</b> (route) et choisis le format <b>JSON</b>.</>)}
+        {step(6, <>Période : depuis la dernière synchronisation. Fréquence : la plus courte proposée. Active l’automatisation.</>)}
+        {step(7, <>Fais une course de test, puis touche <b>Course</b> sur l’accueil d’Élan : elle s’affiche avec sa carte. Les séances de muscu, elles, se rangent toutes seules avec la séance du jour.</>)}
+      </div>
+      <p className="tiny muted" style={{ margin: 0, lineHeight: 1.5 }}>
+        Garmin : dans Garmin Connect, autorise le partage des activités avec Santé. Selon les modèles, le parcours n’est pas toujours partagé.
+      </p>
+
+      <details className="card" style={{ background: 'var(--card2)', boxShadow: 'none' }}>
+        <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Sans Health Auto Export : le raccourci gratuit</summary>
+        <p className="small muted" style={{ lineHeight: 1.5 }}>
+          Il envoie les calories et le cœur de ta séance de muscu. Il ne sait pas lire les courses ni leur parcours.
+        </p>
       <div className="col" style={{ gap: 12 }}>
         {step(1, <>Ouvre l’app <b>Raccourcis</b>, touche <b>+</b> et nomme le raccourci <b>{SHORTCUT_NAME}</b> (exactement).</>)}
         {step(2, <>Ajoute l’action <b>Obtenir le contenu de l’URL</b> et colle ton adresse.</>)}
@@ -756,6 +774,7 @@ function WatchPage() {
           Tester le raccourci maintenant
         </button>
       )}
+      </details>
       <p className="tiny muted" style={{ margin: 0, lineHeight: 1.5 }}>
         Au premier lancement, l’iPhone te demande d’autoriser Raccourcis à lire Santé : accepte l’énergie active et la fréquence cardiaque. Ta femme crée son propre lien depuis son compte.
       </p>

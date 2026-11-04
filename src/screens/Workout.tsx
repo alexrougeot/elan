@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tab } from '../App';
 import { getData, getDoc, putDoc, removeDoc, useStoreVersion } from '../lib/store';
-import { dayKey, fmtNum, fmtWeight, shortDate, WEEKDAYS } from '../lib/dates';
+import { addDays, dayKey, fmtNum, fmtWeight, shortDate, WEEKDAYS } from '../lib/dates';
 import { CATALOG, estimateMinutes, exName, platesFor, type Circuit, type Program, type ProgramDay } from '../lib/program';
 import { autoAdjust, bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
-import { activeSession, adjustRest, getProgram, groupMembers, nextPending, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest } from '../lib/workout';
+import { activeSession, adjustRest, getProgram, groupMembers, nextPending, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest, warmupsFor, type Readiness } from '../lib/workout';
 import { haptic, keepScreenOn, tone, unlockAudio } from '../lib/device';
 import { getLink, healthForSession, healthLine } from '../lib/health';
 import { HeroLeaves, Icon, Ring, Sheet, Stepper, muscleTint, showToast, useNow } from '../components/ui';
+import { ACTIVITY, activeCircuit, activities, activitiesOn, activityLine, takeCircuitAsk } from '../lib/activity';
+import ActivitySheet from '../components/ActivitySheet';
+import { CircuitStartSheet, CircuitView } from './Circuit';
+import { fetchRun, openRun } from './Runs';
 
 export default function Workout({ go }: { go: (t: Tab) => void }) {
   useStoreVersion();
   const active = activeSession();
   if (active) return <SessionView id={active.id} />;
+  const circuit = activeCircuit();
+  if (circuit) return <CircuitView id={circuit.id} />;
   return <Planner go={go} />;
 }
 
@@ -25,12 +31,30 @@ function Planner({ go }: { go: (t: Tab) => void }) {
   const doneToday = history.find((s) => s.data.date === today);
   const [busy, setBusy] = useState(false);
 
-  async function start(day: ProgramDay) {
+  const [ask, setAsk] = useState<ProgramDay | null>(null);
+  const [circuitOpen, setCircuitOpen] = useState(() => takeCircuitAsk());
+  const [actOpen, setActOpen] = useState(false);
+  const acts = activities().slice(0, 12);
+  const feed = [
+    ...history.map((s) => ({ at: s.data.startedAt, s, a: undefined })),
+    ...acts.map((a) => ({ at: a.data.startedAt ?? a.data.date + 'T12:00:00', s: undefined, a })),
+  ]
+    .sort((x, y) => (x.at < y.at ? 1 : -1))
+    .slice(0, 12);
+
+  function start(day: ProgramDay) {
     if (!program || busy) return;
-    setBusy(true);
     unlockAudio();
     haptic();
-    await startSession(day, program);
+    setAsk(day);
+  }
+
+  async function go2(score: Readiness) {
+    if (!program || !ask) return;
+    setBusy(true);
+    const day = ask;
+    setAsk(null);
+    await startSession(day, program, score);
     setBusy(false);
   }
 
@@ -120,13 +144,69 @@ function Planner({ go }: { go: (t: Tab) => void }) {
         </>
       )}
 
-      {history.length > 0 && (
+      <div className="section-head">
+        <h2 className="h2">Week-end et activités libres</h2>
+      </div>
+      <div className="card tight">
+        <button className="list-row press" onClick={() => setCircuitOpen(true)}>
+          <span className="tile sm tint-orange">
+            <Icon name="bolt" size={18} />
+          </span>
+          <div className="grow col" style={{ gap: 2 }}>
+            <span style={{ fontWeight: 600 }}>Séance type Hyrox</span>
+            <span className="small muted">3 formats au choix, nouveau contenu chaque semaine</span>
+          </div>
+          <Icon name="right" style={{ color: 'var(--ink3)' }} />
+        </button>
+        <div className="divider" />
+        <button className="list-row press" onClick={fetchRun}>
+          <span className="tile sm tint-sky">
+            <Icon name="run" size={18} />
+          </span>
+          <div className="grow col" style={{ gap: 2 }}>
+            <span style={{ fontWeight: 600 }}>Course</span>
+            <span className="small muted">Récupérée de ta montre, avec le parcours</span>
+          </div>
+          <Icon name="right" style={{ color: 'var(--ink3)' }} />
+        </button>
+        <div className="divider" />
+        <button className="list-row press" onClick={() => setActOpen(true)}>
+          <span className="tile sm tint-violet">
+            <Icon name="plus" size={18} />
+          </span>
+          <div className="grow col" style={{ gap: 2 }}>
+            <span style={{ fontWeight: 600 }}>Noter une activité à la main</span>
+            <span className="small muted">Vélo, natation, marche, course sans montre…</span>
+          </div>
+          <Icon name="right" style={{ color: 'var(--ink3)' }} />
+        </button>
+      </div>
+
+      {feed.length > 0 && (
         <>
           <div className="section-head">
             <h2 className="h2">Dernières séances</h2>
           </div>
           <div className="card tight">
-            {history.map((s, i) => {
+            {feed.map(({ s, a }, i) => {
+              if (a)
+                return (
+                  <div key={a.id}>
+                    <div className={'list-row' + (a.data.type === 'course' ? ' press' : '')} role={a.data.type === 'course' ? 'button' : undefined} tabIndex={a.data.type === 'course' ? 0 : undefined} onClick={a.data.type === 'course' ? () => openRun(a.id) : undefined}>
+                      <span className={'tile sm ' + (a.data.type === 'circuit' ? 'tint-orange' : 'tint-sky')}>
+                        <Icon name={ACTIVITY[a.data.type].icon} size={18} />
+                      </span>
+                      <div className="grow col" style={{ gap: 2 }}>
+                        <span style={{ fontWeight: 600 }}>{ACTIVITY[a.data.type].label}</span>
+                        <span className="small muted">
+                          {shortDate(a.data.date)} · {activityLine(a.data)}
+                        </span>
+                      </div>
+                    </div>
+                    {i < feed.length - 1 && <div className="divider" />}
+                  </div>
+                );
+              if (!s) return null;
               const st = sessionStats(s.data);
               const min = s.data.endedAt ? Math.round((new Date(s.data.endedAt).getTime() - new Date(s.data.startedAt).getTime()) / 60000) : 0;
               return (
@@ -147,13 +227,16 @@ function Planner({ go }: { go: (t: Tab) => void }) {
                       )}
                     </div>
                   </div>
-                  {i < history.length - 1 && <div className="divider" />}
+                  {i < feed.length - 1 && <div className="divider" />}
                 </div>
               );
             })}
           </div>
         </>
       )}
+      <ReadinessSheet day={ask} onClose={() => setAsk(null)} onPick={go2} />
+      <CircuitStartSheet open={circuitOpen} onClose={() => setCircuitOpen(false)} />
+      <ActivitySheet open={actOpen} onClose={() => setActOpen(false)} />
     </main>
   );
 }
@@ -302,6 +385,15 @@ function SessionView({ id }: { id: string }) {
         <div style={{ width: (totalSets ? (doneSets / totalSets) * 100 : 0) + '%' }} />
       </div>
 
+      {s.exercises.filter((e) => e.tip.kind === 'new').length >= Math.ceil(s.exercises.filter((e) => !e.planned.circuit).length / 2) && (
+        <div className="card row" style={{ background: 'var(--sky-tint)', boxShadow: 'none', alignItems: 'flex-start' }}>
+          <Icon name="info" style={{ color: 'var(--sky-ink)', marginTop: 2 }} />
+          <span className="small" style={{ color: 'var(--sky-ink)', lineHeight: 1.45 }}>
+            <b>Semaine de calibration.</b> Mets les charges avec lesquelles tu travailles d’habitude. Dès la prochaine séance, Élan s’en sert pour calculer tes charges et tes échauffements, puis il ajuste après chaque séance.
+          </span>
+        </div>
+      )}
+
       {s.deload && (
         <div className="card row" style={{ background: 'var(--amber-tint)', boxShadow: 'none' }}>
           <Icon name="info" style={{ color: 'var(--amber-ink)' }} />
@@ -331,6 +423,14 @@ function SessionView({ id }: { id: string }) {
           onRemoveSet={() => removeSet(ei)}
           onReplace={() => setReplace(ei)}
           onPlates={() => setPlates(ei)}
+          onWarm={(i) =>
+            void updateSession(id, (x) => {
+              const w = x.exercises[ei].warm ?? [];
+              w[i] = !w[i];
+              x.exercises[ei].warm = w;
+              return x;
+            })
+          }
         />
         )
       )}
@@ -365,6 +465,7 @@ function ExerciseCard({
   onRemoveSet,
   onReplace,
   onPlates,
+  onWarm,
 }: {
   id: string;
   sid: string;
@@ -380,8 +481,11 @@ function ExerciseCard({
   onRemoveSet: () => void;
   onReplace: () => void;
   onPlates: () => void;
+  onWarm: (i: number) => void;
 }) {
   const def = CATALOG[ex.key];
+  const bar = getData<{ bar?: number }>('settings')?.bar ?? 20;
+  const warm = ex.sets[0] && !ex.sets[0].done ? warmupsFor(ex.key, ex.sets[0].w, bar) : [];
   const timed = !!def?.timed;
   const last = useMemo(() => historyFor(ex.key, sid)[0], [ex.key, sid]);
   const allDone = ex.sets.every((x) => x.done);
@@ -447,6 +551,25 @@ function ExerciseCard({
               <span>{timed ? 'Durée' : 'Reps'}</span>
               <span />
             </div>
+            {warm.map((w, i) => (
+              <div key={'w' + i} className="set-row" style={{ minHeight: 44, opacity: ex.warm?.[i] ? 0.55 : 1 }}>
+                <span className="tiny" style={{ fontWeight: 700, color: 'var(--sky-ink)' }}>Éch.</span>
+                <span className="small" style={{ fontWeight: 600, paddingLeft: 10 }}>
+                  {fmtWeight(w.w)} kg
+                </span>
+                <span className="small" style={{ fontWeight: 600, paddingLeft: 10 }}>
+                  {w.r} reps
+                </span>
+                <button className={'check press ' + (ex.warm?.[i] ? 'done' : 'todo')} style={{ width: 44, height: 38 }} aria-label={`Échauffement ${i + 1} ${ex.warm?.[i] ? 'fait' : 'à faire'}`} onClick={() => onWarm(i)}>
+                  <Icon name="check" size={16} />
+                </button>
+              </div>
+            ))}
+            {warm.length === 0 && ex.sets[0] && !ex.sets[0].done && ex.sets[0].w === 0 && def?.compound && !def.timed && (
+              <div className="tiny" style={{ color: 'var(--sky-ink)', padding: '0 8px' }}>
+                Échauffement : 2 séries légères (barre ou charge légère, puis la moitié de ta charge). Dès que tu mets ta charge, Élan les calcule.
+              </div>
+            )}
             {ex.sets.map((x, sj) => {
               const active = sj === activeSj;
               return (
@@ -1017,6 +1140,62 @@ function CircuitSheet({ circuit, onClose, onDone }: { circuit?: Circuit; onClose
           )}
         </div>
       )}
+    </Sheet>
+  );
+}
+
+// ---------------- Forme du jour ----------------
+function ReadinessSheet({ day, onClose, onPick }: { day: ProgramDay | null; onClose: () => void; onPick: (r: Readiness) => void }) {
+  const [sleep, setSleep] = useState(1);
+  const [energy, setEnergy] = useState(1);
+  useEffect(() => {
+    setSleep(1);
+    setEnergy(1);
+  }, [day?.id]);
+  const score = (Math.min(5, Math.max(1, sleep + energy + 1)) as Readiness);
+  const msg = [
+    '',
+    'Grosse fatigue : une série de moins et −10 % sur les charges.',
+    'Un peu fatigué : −5 % sur les charges.',
+    'Forme normale : séance prévue.',
+    'En forme : séance prévue, donne tout.',
+    'Au top : on tente un peu plus lourd sur le premier gros exercice.',
+  ][score];
+  const row = (label: string, value: number, set: (v: number) => void, opts: string[]) => (
+    <div className="col" style={{ gap: 6 }}>
+      <span className="small muted" style={{ fontWeight: 600 }}>
+        {label}
+      </span>
+      <div className="segmented" role="group" aria-label={label}>
+        {opts.map((o, i) => (
+          <button key={o} aria-pressed={value === i} onClick={() => set(i)}>
+            {o}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  // grosse activité la veille : on prévient pour les jambes
+  const yesterday = activitiesOn(addDays(dayKey(), -1)).find((a) => ['course', 'circuit'].includes(a.data.type) && (a.data.rpe ?? 2) >= 2);
+  const legs = day?.exercises.some((e) => CATALOG[e.key]?.lower);
+  return (
+    <Sheet open={!!day} onClose={onClose} title="Ta forme du jour">
+      {yesterday && (
+        <div className="card row small" style={{ background: 'var(--orange-tint)', boxShadow: 'none', color: 'var(--orange-ink)', gap: 8 }}>
+          <Icon name="run" size={18} />
+          Hier : {ACTIVITY[yesterday.data.type].label.toLowerCase()} ({activityLine(yesterday.data)}).{legs ? ' Si tes jambes sont lourdes, mets une énergie plus faible : je baisserai les charges.' : ''}
+        </div>
+      )}
+      {row('Ton sommeil cette nuit', sleep, setSleep, ['Mauvais', 'Moyen', 'Bon'])}
+      {row('Ton énergie ce matin', energy, setEnergy, ['Faible', 'Normale', 'Haute'])}
+      <div className="card row small" style={{ background: score <= 2 ? 'var(--amber-tint)' : score === 5 ? 'var(--brand-tint)' : 'var(--card2)', boxShadow: 'none', color: score <= 2 ? 'var(--amber-ink)' : score === 5 ? 'var(--brand-deep)' : 'var(--ink)' }}>
+        <Icon name="heart" size={18} />
+        {msg}
+      </div>
+      <button className="btn brand press" onClick={() => onPick(score)}>
+        <Icon name="dumbbell" />
+        Commencer
+      </button>
     </Sheet>
   );
 }

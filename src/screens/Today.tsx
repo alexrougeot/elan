@@ -8,6 +8,12 @@ import { activeSession, extraFor, getProgram, planFor, sessionToday } from '../l
 import { isDeloadWeek, sessions } from '../lib/coach';
 import { useSyncStatus } from '../lib/sync';
 import { getLink, healthForSession, healthLine, healthOn, runShortcut } from '../lib/health';
+import { addWater, GLASS, WATER_REMINDERS, waterGoal, waterOn } from '../lib/water';
+import { ACTIVITY, activities, activitiesOn, activityKcal, activityLine, askCircuit, fuelBonus } from '../lib/activity';
+import ActivitySheet, { bonusFood } from '../components/ActivitySheet';
+import { fetchRun, openRun } from './Runs';
+import { haptic } from '../lib/device';
+import { putDoc } from '../lib/store';
 import { HeroLeaves, Icon, LogoMark, Ring, mealVisual, showToast } from '../components/ui';
 import WeighInSheet from '../components/WeighIn';
 import WeeklyReview from '../components/WeeklyReview';
@@ -35,6 +41,15 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   const sync = useSyncStatus();
   const [weighIn, setWeighIn] = useState(false);
   const [review, setReview] = useState(false);
+  const [actOpen, setActOpen] = useState(false);
+  const todayActs = activitiesOn(today);
+  const weekend = [6, 7].includes(weekday(parseDay(today)));
+
+  // objectif d'hydratation enregistré pour les rappels
+  useEffect(() => {
+    const t = getTargets();
+    if (t && !t.water) void putDoc('targets', 'targets', { ...t, water: { goalMl: waterGoal(profile), reminders: WATER_REMINDERS } });
+  }, []);
 
   useEffect(() => {
     runWeeklyAdjustment(profile).then((adj) => {
@@ -57,13 +72,14 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   // Semaine
   const monday = weekStart(today);
   const doneDates = new Set(sessions().filter((s) => s.data.endedAt).map((s) => s.data.date));
+  const actDates = new Set(activities().map((a) => a.data.date));
   const plannedDays = new Set(program?.days.map((d) => d.weekday) ?? []);
   const extraDays = new Set(program?.extras.map((d) => d.weekday) ?? []);
   const week = Array.from({ length: 7 }, (_, i) => {
     const key = addDays(monday, i);
     const wd = weekday(parseDay(key));
     const started = !program || key >= program.startDate;
-    const state = doneDates.has(key) ? 'done' : plannedDays.has(wd) && started ? (key < today ? 'missed' : 'planned') : extraDays.has(wd) && started ? 'extra' : '';
+    const state = doneDates.has(key) ? 'done' : actDates.has(key) ? 'activity' : plannedDays.has(wd) && started ? (key < today ? 'missed' : 'planned') : extraDays.has(wd) && started ? 'extra' : '';
     return { key, wd, state, day: parseDay(key).getDate() };
   });
   const doneThisWeek = week.filter((d) => d.state === 'done').length;
@@ -157,7 +173,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
               Séance du jour
             </span>
             <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.01em' }}>
-              {active ? active.data.title : plan ? `${plan.title}${plan.subtitle ? ' · ' + plan.subtitle : ''}` : 'Repos'}
+              {active ? active.data.title : plan ? `${plan.title}${plan.subtitle ? ' · ' + plan.subtitle : ''}` : weekend ? 'Week-end libre' : 'Repos'}
             </span>
           </div>
           {done?.data.endedAt ? (
@@ -185,7 +201,30 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
             )}
           </div>
         )}
-        {!plan && !active && <span className="small muted">{extra ? extra.title : 'Pas de séance prévue aujourd’hui : récupère bien.'}</span>}
+        {!plan && !active && !(weekend && todayActs.length === 0) && (
+          <span className="small muted">{todayActs.length ? 'Activité enregistrée, bien joué. Le reste de la journée : on récupère.' : extra ? extra.title : 'Pas de séance prévue aujourd’hui : récupère bien.'}</span>
+        )}
+        {!plan && !active && weekend && todayActs.length === 0 && (
+          <>
+            <span className="small muted">Week-end : une course, une séance type Hyrox à la salle, ou du repos. Tout compte.</span>
+            <div className="fields-2">
+              <button className="btn soft press" onClick={fetchRun}>
+                <Icon name="run" size={19} />
+                Course
+              </button>
+              <button
+                className="btn soft press"
+                onClick={() => {
+                  askCircuit();
+                  go('workout');
+                }}
+              >
+                <Icon name="bolt" size={19} />
+                Hyrox
+              </button>
+            </div>
+          </>
+        )}
         {done?.data.endedAt && (() => {
           const h = healthForSession(done.id);
           return h ? (
@@ -213,6 +252,42 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         )}
         {extra && plan && <span className="small muted">Et aussi : {extra.title.toLowerCase()}</span>}
       </section>
+
+      {todayActs.map((a) => {
+        const watch = healthOn(today)
+          .filter((h) => !h.sessionId && h.kcal)
+          .reduce((x, h) => x + (h.kcal ?? 0), 0);
+        const kcal = watch || activityKcal(a.data, weight);
+        const bonus = fuelBonus(kcal, profile.goal);
+        return (
+          <section
+            key={a.id}
+            className={'card col' + (a.data.type === 'course' ? ' press' : '')}
+            style={{ gap: 10 }}
+            role={a.data.type === 'course' ? 'button' : undefined}
+            tabIndex={a.data.type === 'course' ? 0 : undefined}
+            onClick={a.data.type === 'course' ? () => openRun(a.id) : undefined}
+          >
+            <div className="row">
+              <span className={'tile ' + (a.data.type === 'circuit' ? 'tint-orange' : 'tint-sky')}>
+                <Icon name={ACTIVITY[a.data.type].icon} />
+              </span>
+              <div className="grow col" style={{ gap: 2 }}>
+                <span className="tiny muted" style={{ fontWeight: 500 }}>
+                  {ACTIVITY[a.data.type].label} du jour
+                </span>
+                <span style={{ fontWeight: 700 }}>{activityLine(a.data)}</span>
+              </div>
+              <span className="badge gray">{kcal} kcal</span>
+            </div>
+            {bonus > 0 && (
+              <span className="small" style={{ color: 'var(--orange-ink)', background: 'var(--orange-tint)', padding: '10px 12px', borderRadius: 14 }}>
+                Ajoute environ {bonus} kcal aujourd’hui pour ne pas freiner ta prise de masse : {bonusFood(bonus)}.
+              </span>
+            )}
+          </section>
+        );
+      })}
 
       {healthOn(today)
         .filter((h) => !h.sessionId)
@@ -243,8 +318,8 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
             {week.map((d) => (
               <div key={d.key} className={'week-day' + (d.key === today ? ' today' : '')}>
                 <span>{'LMMJVSD'[d.wd - 1]}</span>
-                <div className={'week-dot ' + d.state} aria-label={`${d.day}, ${d.state === 'done' ? 'séance faite' : d.state === 'planned' ? 'séance prévue' : d.state === 'missed' ? 'séance manquée' : d.state === 'extra' ? 'cours collectif' : 'repos'}`}>
-                  {d.state === 'done' ? <Icon name="check" size={16} stroke={2.8} /> : d.state === 'extra' ? <Icon name="flame" size={15} /> : d.day}
+                <div className={'week-dot ' + d.state} aria-label={`${d.day}, ${d.state === 'done' ? 'séance faite' : d.state === 'planned' ? 'séance prévue' : d.state === 'missed' ? 'séance manquée' : d.state === 'extra' ? 'cours collectif' : d.state === 'activity' ? 'activité libre' : 'repos'}`}>
+                  {d.state === 'done' ? <Icon name="check" size={16} stroke={2.8} /> : d.state === 'activity' ? <Icon name="run" size={16} /> : d.state === 'extra' ? <Icon name="flame" size={15} /> : d.day}
                 </div>
               </div>
             ))}
@@ -323,6 +398,50 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         </div>
       </section>
 
+      {/* Hydratation */}
+      {(() => {
+        const goal = waterGoal(profile, targets);
+        const ml = waterOn(today);
+        const glasses = Math.round(goal / GLASS);
+        const drunk = Math.floor(ml / GLASS);
+        return (
+          <section className="card col" style={{ gap: 12 }}>
+            <div className="row">
+              <span className="tile tint-sky">
+                <Icon name="drop" />
+              </span>
+              <div className="grow col" style={{ gap: 1 }}>
+                <span className="tiny muted" style={{ fontWeight: 500 }}>
+                  Hydratation
+                </span>
+                <span style={{ fontSize: 18, fontWeight: 700 }}>
+                  {(ml / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} L <span className="small muted">sur {(goal / 1000).toLocaleString('fr-FR')} L</span>
+                </span>
+              </div>
+              <button className="icon-btn press" aria-label="Retirer un verre" onClick={() => void addWater(-GLASS)} disabled={ml === 0} style={{ opacity: ml === 0 ? 0.4 : 1 }}>
+                <Icon name="minus" />
+              </button>
+              <button
+                className="btn small press"
+                style={{ background: 'var(--sky)', color: '#fff', width: 'auto' }}
+                onClick={() => {
+                  haptic();
+                  void addWater(GLASS);
+                }}
+              >
+                <Icon name="plus" size={18} />
+                Verre
+              </button>
+            </div>
+            <div className="row" style={{ gap: 4 }} aria-label={`${drunk} verres sur ${glasses}`}>
+              {Array.from({ length: glasses }, (_, i) => (
+                <span key={i} style={{ flex: 1, height: 8, borderRadius: 4, background: i < drunk ? 'var(--sky)' : 'var(--track)' }} />
+              ))}
+            </div>
+          </section>
+        );
+      })()}
+
       {isSunday() && (
         <button className="card press row" style={{ border: 'none', textAlign: 'left' }} onClick={() => setReview(true)}>
           <span className="tile tint-violet">
@@ -338,6 +457,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
 
       <WeighInSheet open={weighIn} onClose={() => setWeighIn(false)} />
       <WeeklyReview open={review} onClose={() => setReview(false)} />
+      <ActivitySheet open={actOpen} onClose={() => setActOpen(false)} />
     </main>
   );
 }

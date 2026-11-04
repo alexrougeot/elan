@@ -1,11 +1,13 @@
-// Envoie les notifications de repas à l'heure prévue par chaque utilisateur.
+// Envoie les notifications de repas à l'heure prévue par chaque utilisateur,
+// et les rappels d'hydratation quand on est en retard sur l'objectif.
 // Appelée chaque minute par pg_cron.
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
 
 type Meal = { name: string; time: string; share: { p: number; g: number; l: number } };
-type Targets = { p: number; g: number; l: number; meals: Meal[] };
+type Targets = { p: number; g: number; l: number; meals: Meal[]; water?: { goalMl: number; reminders: string[] } };
+type Sub = { endpoint: string; user_id: string; p256dh: string; auth: string; tz: string | null };
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
   auth: { persistSession: false },
@@ -46,6 +48,29 @@ function hhmm(t: string) {
   return `${Number(h)}h${m}`;
 }
 
+/** Réserve la clé dans le journal : renvoie false si la notification est déjà partie */
+async function claim(user: string, key: string) {
+  const { data } = await admin.from('push_log').upsert({ user_id: user, key }, { onConflict: 'user_id,key', ignoreDuplicates: true }).select('key');
+  return !!data && data.length > 0;
+}
+
+async function push(userSubs: Sub[], payload: string) {
+  let n = 0;
+  for (const s of userSubs) {
+    try {
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 1800, urgency: 'high' });
+      n++;
+    } catch (err) {
+      const code = (err as { statusCode?: number }).statusCode;
+      if (code === 404 || code === 410) await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint);
+      else console.error('envoi impossible', code, err);
+    }
+  }
+  return n;
+}
+
+const litres = (ml: number) => (ml / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+
 Deno.serve(async () => {
   try {
     await setupVapid();
@@ -70,29 +95,31 @@ Deno.serve(async () => {
         // fenêtre de 5 minutes au cas où un passage serait manqué
         if (minutes < at || minutes > at + 5) continue;
         const key = `${date}:repas:${i}`;
-        const { data: inserted } = await admin
-          .from('push_log')
-          .upsert({ user_id: user, key }, { onConflict: 'user_id,key', ignoreDuplicates: true })
-          .select('key');
-        if (!inserted || inserted.length === 0) continue;
+        if (!(await claim(user, key))) continue;
 
         const p = Math.round(t.p * meal.share.p);
         const g = Math.round(t.g * meal.share.g);
         const l = Math.round(t.l * meal.share.l);
         const kcal = Math.round(p * 4 + g * 4 + l * 9);
         const body = (i === 0 ? 'Pèse-toi à jeun, puis : ' : '') + `${kcal} kcal · P ${p} g · G ${g} g · L ${l} g`;
-        const payload = JSON.stringify({ title: `${meal.name} · ${hhmm(meal.time)}`, body, tag: key, url: './?onglet=nutrition' });
+        sent += await push(userSubs, JSON.stringify({ title: `${meal.name} · ${hhmm(meal.time)}`, body, tag: key, url: './?onglet=nutrition' }));
+      }
 
-        for (const s of userSubs) {
-          try {
-            await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 1800, urgency: 'high' });
-            sent++;
-          } catch (err) {
-            const code = (err as { statusCode?: number }).statusCode;
-            if (code === 404 || code === 410) await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint);
-            else console.error('envoi impossible', code, err);
-          }
-        }
+      // Hydratation : rappel seulement si on est en retard sur la courbe de la journée (6h → 22h)
+      const water = t.water;
+      if (!water?.goalMl || !water.reminders?.length) continue;
+      for (const time of water.reminders) {
+        const at = toMinutes(time);
+        if (minutes < at || minutes > at + 5) continue;
+        const { data: w } = await admin.from('docs').select('data').eq('user_id', user).eq('id', `water:${date}`).eq('deleted', false).maybeSingle();
+        const ml = Number((w?.data as { ml?: number } | undefined)?.ml ?? 0);
+        const expected = water.goalMl * Math.min(1, Math.max(0, (at - 360) / (1320 - 360)));
+        if (ml >= expected - 250) continue;
+        const key = `${date}:eau:${time}`;
+        if (!(await claim(user, key))) continue;
+        const glasses = Math.max(1, Math.round((expected - ml) / 250));
+        const body = `${litres(ml)} L sur ${litres(water.goalMl)} L. Bois ${glasses} verre${glasses > 1 ? 's' : ''} pour rattraper.`;
+        sent += await push(userSubs, JSON.stringify({ title: 'Pense à boire', body, tag: key, url: './' }));
       }
     }
     return Response.json({ sent });

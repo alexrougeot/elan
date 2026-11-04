@@ -11,6 +11,8 @@ export type SessionExercise = {
   sets: SetEntry[];
   tip: CoachTip;
   swappedFrom?: string;
+  /** séries d'échauffement cochées */
+  warm?: boolean[];
 };
 export type Session = {
   date: string;
@@ -20,6 +22,8 @@ export type Session = {
   startedAt: string;
   endedAt?: string;
   deload?: boolean;
+  /** forme du jour, de 1 à 5 */
+  readiness?: number;
   exercises: SessionExercise[];
 };
 

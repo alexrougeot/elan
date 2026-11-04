@@ -6,6 +6,7 @@ import { loadCiqual, offProduct, offSearch, rememberFood, searchCiqual, searchMi
 import { currentSubscription, enablePush, pushSupported } from '../lib/push';
 import { haptic, isIOS, isStandalone, useOnline } from '../lib/device';
 import { countText, portionsFor, type Portion, type PortionChoice } from '../lib/portions';
+import { mealIdea, mealKind } from '../lib/mealIdeas';
 import { HeroLeaves, Icon, Ring, Sheet, Stepper, mealVisual, showToast } from '../components/ui';
 
 type FavMeal = { name: string; items: (FoodItem & { grams: number; portion?: FoodEntry['portion'] })[] };
@@ -18,6 +19,7 @@ export default function Nutrition() {
   const entries = foodsOn(date);
   const [adding, setAdding] = useState<number | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [idea, setIdea] = useState<number | null>(null);
   const [pushOn, setPushOn] = useState<boolean | null>(null);
   const isToday = date === dayKey();
 
@@ -190,9 +192,13 @@ export default function Nutrition() {
                 <Icon name="plus" size={16} />
                 Ajouter
               </button>
-              <button className="chip press" onClick={() => copyYesterday(i)}>
+              <button className="chip press" onClick={() => setIdea(i)} aria-label="Je mange quoi ?">
+                <Icon name="idea" size={16} />
+                Idée
+              </button>
+              <button className="chip press" onClick={() => copyYesterday(i)} aria-label="Comme hier">
                 <Icon name="copy" size={16} />
-                Comme hier
+                Hier
               </button>
               {items.length > 0 && (
                 <button className="chip press" style={{ width: 44, justifyContent: 'center', padding: 0 }} onClick={() => saveFavorite(i)} aria-label="Enregistrer ce repas en favori">
@@ -210,6 +216,7 @@ export default function Nutrition() {
 
       <AddFoodSheet date={date} meal={adding} onClose={() => setAdding(null)} />
       <EditEntrySheet id={editing} onClose={() => setEditing(null)} />
+      <IdeaSheet date={date} meal={idea} onClose={() => setIdea(null)} />
     </main>
   );
 }
@@ -777,5 +784,82 @@ function CustomFoodForm({ code, onCancel, onSaved }: { code?: string; onCancel: 
         Annuler
       </button>
     </form>
+  );
+}
+
+// ---------------- Je mange quoi ? ----------------
+function IdeaSheet({ date, meal, onClose }: { date: string; meal: number | null; onClose: () => void }) {
+  const targets = getTargets();
+  const [variant, setVariant] = useState(0);
+  useEffect(() => setVariant(0), [meal]);
+  if (meal === null || !targets) return <Sheet open={false} onClose={onClose} title="">{null}</Sheet>;
+  const m = targets.meals[meal];
+  const tgt = mealTarget(targets, meal);
+  const got = sum(foodsOn(date).filter((f) => f.data.meal === meal).map((f) => entryMacros(f.data)));
+  const left = { k: tgt.k - got.k, p: Math.max(0, tgt.p - got.p), g: Math.max(0, tgt.g - got.g), l: Math.max(0, tgt.l - got.l) };
+  const idea = mealIdea(mealKind(m.name, m.time), left, variant);
+
+  async function addAll() {
+    if (!idea || meal === null) return;
+    haptic();
+    for (const it of idea.items) {
+      await putDoc('food:' + uid(), 'food', {
+        date,
+        meal,
+        name: it.food.name,
+        grams: it.grams,
+        per100: it.food.per100,
+        src: 'ciqual',
+        ref: it.food.ref,
+        portion: it.portion,
+        at: new Date().toISOString(),
+      } as FoodEntry);
+      await rememberFood(it.food, it.grams, it.portion ? { one: it.portion.one, count: it.portion.count } : undefined);
+    }
+    showToast('Repas ajouté');
+    onClose();
+  }
+
+  return (
+    <Sheet open={meal !== null} onClose={onClose} title={`Je mange quoi ? · ${m.name}`}>
+      {!idea ? (
+        <div className="empty">Ce repas est déjà complet. Bien joué !</div>
+      ) : (
+        <>
+          <span className="small muted">
+            Il te reste {Math.round(left.k)} kcal pour ce repas : P {Math.round(left.p)} g · G {Math.round(left.g)} g · L {Math.round(left.l)} g. Avec des aliments de base :
+          </span>
+          <div className="card col" style={{ gap: 10, background: 'var(--card2)', boxShadow: 'none' }}>
+            {idea.items.map((it, i) => (
+              <div key={i} className="row" style={{ gap: 12 }}>
+                <span className="tile sm tint-brand" style={{ fontWeight: 700, fontSize: 14 }}>
+                  {i + 1}
+                </span>
+                <div className="grow col" style={{ gap: 1 }}>
+                  <span style={{ fontWeight: 600 }}>{it.text}</span>
+                  <span className="tiny muted">{Math.round((it.food.per100.k * it.grams) / 100)} kcal</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="row small" style={{ justifyContent: 'space-between' }}>
+            <span className="muted">Total</span>
+            <span style={{ fontWeight: 700 }}>
+              {Math.round(idea.total.k)} kcal · P {Math.round(idea.total.p)} · G {Math.round(idea.total.g)} · L {Math.round(idea.total.l)}
+            </span>
+          </div>
+          <button className="btn brand press" onClick={addAll}>
+            Ajouter ce repas
+          </button>
+          <button className="btn ghost press" onClick={() => setVariant((v) => v + 1)}>
+            <Icon name="idea" size={18} />
+            Une autre idée
+          </button>
+          <p className="tiny muted" style={{ margin: 0 }}>
+            Poids cuits pour les féculents et les viandes. Tu pourras ajuster chaque aliment après l’ajout.
+          </p>
+        </>
+      )}
+    </Sheet>
   );
 }
