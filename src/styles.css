@@ -881,6 +881,11 @@ body {
   background: var(--sky-tint);
   color: var(--sky-ink);
 }
+.week-dot.skipped {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--line2);
+  color: var(--ink3);
+}
 .week-dot.activity {
   background: var(--orange-tint);
   color: var(--orange-ink);

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { getData, getDoc, putDoc, uid } from './store';
-import { dayKey, daysBetween, weekday } from './dates';
+import { dayKey, daysBetween, parseDay, weekday } from './dates';
 import { CATALOG, weeklyCircuit, type Program, type ProgramDay } from './program';
 import { focusMuscles, groupOf } from './analysis';
 import { bestE1rm, e1rm, isDeloadWeek, prepareExercise, sessions, type Session } from './coach';
@@ -10,8 +10,55 @@ export function getProgram() {
   return getData<Program>('program');
 }
 
+/**
+ * Changements ponctuels du planning : { date: id de la séance à faire ce jour-là, ou null = pas de séance }.
+ * Sert à sauter ou décaler une séance sans toucher au programme.
+ */
+export type Moves = Record<string, string | null>;
+export function getMoves(): Moves {
+  return getData<Moves>('moves') ?? {};
+}
+
 export function planFor(program: Program | undefined, d = new Date()) {
+  const moves = getMoves();
+  const key = dayKey(d);
+  if (key in moves) {
+    const id = moves[key];
+    return id ? program?.days.find((x) => x.id === id) : undefined;
+  }
   return program?.days.find((x) => x.weekday === weekday(d));
+}
+
+/** La séance prévue normalement ce jour-là (sans tenir compte des changements) */
+export function usualPlan(program: Program | undefined, d = new Date()) {
+  return program?.days.find((x) => x.weekday === weekday(d));
+}
+
+async function saveMoves(next: Moves) {
+  // on ne garde que les 60 derniers jours
+  const limit = dayKey(new Date(Date.now() - 60 * 864e5));
+  await putDoc('moves', 'moves', Object.fromEntries(Object.entries(next).filter(([k]) => k >= limit)));
+}
+
+/** Sauter la séance d'aujourd'hui, et la refaire un autre jour si `to` est donné */
+export async function skipDay(dayId: string, from = dayKey(), to?: string) {
+  const next = { ...getMoves(), [from]: null };
+  if (to) next[to] = dayId;
+  await saveMoves(next);
+}
+
+/** Revenir au planning normal pour ce jour (et annuler le report lié) */
+export async function undoSkip(date = dayKey()) {
+  const moves = getMoves();
+  const program = getProgram();
+  const usual = usualPlan(program, parseDay(date));
+  const next: Moves = {};
+  for (const [k, v] of Object.entries(moves)) {
+    if (k === date) continue;
+    if (usual && v === usual.id && k > date) continue;
+    next[k] = v;
+  }
+  await saveMoves(next);
 }
 
 export function extraFor(program: Program | undefined, d = new Date()) {

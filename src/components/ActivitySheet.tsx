@@ -6,7 +6,7 @@ import { ACTIVITY, activityKcal, fuelBonus, pace, saveActivity, type Activity, t
 import { haptic } from '../lib/device';
 import { Icon, Sheet, Stepper, showToast } from './ui';
 
-const TYPES: ActivityType[] = ['course', 'velo', 'natation', 'marche', 'autre'];
+const TYPES: ActivityType[] = ['cours', 'course', 'velo', 'natation', 'marche', 'autre'];
 const DEFAULTS: Record<ActivityType, { km: number; step: number; minutes: number }> = {
   course: { km: 6, step: 0.5, minutes: 40 },
   velo: { km: 20, step: 1, minutes: 60 },
@@ -14,6 +14,7 @@ const DEFAULTS: Record<ActivityType, { km: number; step: number; minutes: number
   marche: { km: 5, step: 0.5, minutes: 60 },
   autre: { km: 0, step: 1, minutes: 45 },
   circuit: { km: 0, step: 1, minutes: 45 },
+  cours: { km: 0, step: 1, minutes: 45 },
 };
 
 /** Ce qu'on ajoute dans l'assiette pour compenser, avec des aliments simples */
@@ -24,7 +25,7 @@ export function bonusFood(kcal: number) {
   return '80 g de pâtes (crues) en plus et une banane';
 }
 
-export default function ActivitySheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function ActivitySheet({ open, onClose, initial, duoDefault }: { open: boolean; onClose: () => void; initial?: ActivityType; duoDefault?: boolean }) {
   const profile = getData<Profile>('profile');
   const [type, setType] = useState<ActivityType>('course');
   const [minutes, setMinutes] = useState(40);
@@ -36,6 +37,8 @@ export default function ActivitySheet({ open, onClose }: { open: boolean; onClos
   useEffect(() => {
     if (!open) return;
     setYesterday(false);
+    pick(initial ?? 'course');
+    setDuo(!!duoDefault);
   }, [open]);
 
   function pick(t: ActivityType) {
@@ -54,7 +57,7 @@ export default function ActivitySheet({ open, onClose }: { open: boolean; onClos
     haptic();
     const { at: _at, ...rest } = draft;
     await saveActivity(rest);
-    showToast(`${def.label} enregistrée${bonus && !yesterday ? ` : +${bonus} kcal à manger aujourd’hui` : ''}`);
+    showToast(`${def.label} enregistré${type === 'course' || type === 'natation' || type === 'marche' ? 'e' : ''}${bonus && !yesterday ? ` : +${bonus} kcal à manger aujourd’hui` : ''}`);
     onClose();
   }
 

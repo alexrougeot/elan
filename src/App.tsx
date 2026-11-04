@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Session as AuthSession } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { getData, openStore, putDoc, useStoreVersion } from './lib/store';
-import { upgradedProgram, type Program } from './lib/program';
+import { loadCustomExercises, upgradedProgram, type Program } from './lib/program';
 import { startSyncLoop, syncNow } from './lib/sync';
 import type { Profile } from './lib/nutrition';
 import { Icon, LogoMark, Toasts, showToast } from './components/ui';
@@ -13,7 +13,7 @@ import Today from './screens/Today';
 import Workout from './screens/Workout';
 import Nutrition from './screens/Nutrition';
 import Progress from './screens/Progress';
-import Settings from './screens/Settings';
+import Settings, { type SettingsStart } from './screens/Settings';
 
 export type Tab = 'today' | 'workout' | 'nutrition' | 'progress';
 const TABS: { id: Tab; label: string; icon: string }[] = [
@@ -103,6 +103,7 @@ function Splash() {
 
 function Signed() {
   useStoreVersion();
+  loadCustomExercises();
   const profile = getData<Profile>('profile');
   const [firstSyncDone, setFirstSyncDone] = useState(!!profile);
 
@@ -125,6 +126,7 @@ function Signed() {
 function Shell() {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [settings, setSettings] = useState(false);
+  const [settingsStart, setSettingsStart] = useState<SettingsStart>(null);
 
   // Programme type d'origine jamais modifié : on passe à la nouvelle version
   useEffect(() => {
@@ -144,8 +146,24 @@ function Shell() {
 
   return (
     <div className="app">
-      {tab === 'today' && <Today go={setTab} openSettings={() => setSettings(true)} />}
-      {tab === 'workout' && <Workout go={setTab} />}
+      {tab === 'today' && (
+        <Today
+          go={setTab}
+          openSettings={() => {
+            setSettingsStart(null);
+            setSettings(true);
+          }}
+        />
+      )}
+      {tab === 'workout' && (
+        <Workout
+          go={setTab}
+          openProgram={(dayId) => {
+            setSettingsStart({ page: 'program', dayId });
+            setSettings(true);
+          }}
+        />
+      )}
       {tab === 'nutrition' && <Nutrition />}
       {tab === 'progress' && <Progress />}
 
@@ -162,7 +180,7 @@ function Shell() {
         </div>
       </nav>
 
-      <Settings open={settings} onClose={() => setSettings(false)} />
+      <Settings open={settings} onClose={() => setSettings(false)} start={settingsStart} />
       <RunHost />
       <Toasts />
     </div>

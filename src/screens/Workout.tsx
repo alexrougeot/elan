@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tab } from '../App';
 import { getData, getDoc, putDoc, removeDoc, useStoreVersion } from '../lib/store';
 import { addDays, dayKey, fmtNum, fmtWeight, shortDate, WEEKDAYS } from '../lib/dates';
-import { CATALOG, estimateMinutes, exName, platesFor, type Circuit, type Program, type ProgramDay } from '../lib/program';
+import { CATALOG, defaultRest, estimateMinutes, exName, platesFor, type Circuit, type Program, type ProgramDay } from '../lib/program';
 import { autoAdjust, bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
 import { activeSession, adjustRest, getProgram, groupMembers, nextPending, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest, warmupsFor, type Readiness } from '../lib/workout';
 import { haptic, keepScreenOn, tone, unlockAudio } from '../lib/device';
@@ -11,19 +11,21 @@ import { HeroLeaves, Icon, Ring, Sheet, Stepper, muscleTint, showToast, useNow }
 import { ACTIVITY, activeCircuit, activities, activitiesOn, activityLine, takeCircuitAsk } from '../lib/activity';
 import ActivitySheet from '../components/ActivitySheet';
 import { CircuitStartSheet, CircuitView } from './Circuit';
+import ExercisePicker from '../components/ExercisePicker';
+import SkipSheet from '../components/SkipSheet';
 import { fetchRun, openRun } from './Runs';
 
-export default function Workout({ go }: { go: (t: Tab) => void }) {
+export default function Workout({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayId?: string) => void }) {
   useStoreVersion();
   const active = activeSession();
   if (active) return <SessionView id={active.id} />;
   const circuit = activeCircuit();
   if (circuit) return <CircuitView id={circuit.id} />;
-  return <Planner go={go} />;
+  return <Planner go={go} openProgram={openProgram} />;
 }
 
 // ---------------- Choisir une séance ----------------
-function Planner({ go }: { go: (t: Tab) => void }) {
+function Planner({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayId?: string) => void }) {
   const program = getProgram();
   const plan = planFor(program);
   const today = dayKey();
@@ -34,6 +36,7 @@ function Planner({ go }: { go: (t: Tab) => void }) {
   const [ask, setAsk] = useState<ProgramDay | null>(null);
   const [circuitOpen, setCircuitOpen] = useState(() => takeCircuitAsk());
   const [actOpen, setActOpen] = useState(false);
+  const [skip, setSkip] = useState(false);
   const acts = activities().slice(0, 12);
   const feed = [
     ...history.map((s) => ({ at: s.data.startedAt, s, a: undefined })),
@@ -62,6 +65,10 @@ function Planner({ go }: { go: (t: Tab) => void }) {
     <main className="screen">
       <header className="screen-head">
         <h1 className="title">Séance</h1>
+        <button className="btn small ghost press" onClick={() => openProgram()}>
+          <Icon name="edit" size={17} />
+          Programme
+        </button>
       </header>
 
       {!program || program.days.length === 0 ? (
@@ -111,6 +118,18 @@ function Planner({ go }: { go: (t: Tab) => void }) {
                 <Icon name="dumbbell" />
                 {doneToday ? 'Refaire cette séance' : 'Commencer la séance'}
               </button>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="hero-chip press grow" style={{ border: 'none', justifyContent: 'center', minHeight: 40 }} onClick={() => openProgram(plan.id)}>
+                  <Icon name="edit" size={15} />
+                  Modifier les exercices
+                </button>
+                {!doneToday && (
+                  <button className="hero-chip press grow" style={{ border: 'none', justifyContent: 'center', minHeight: 40 }} onClick={() => setSkip(true)}>
+                    <Icon name="calendar" size={15} />
+                    Pas aujourd’hui
+                  </button>
+                )}
+              </div>
             </section>
           )}
 
@@ -237,6 +256,7 @@ function Planner({ go }: { go: (t: Tab) => void }) {
       <ReadinessSheet day={ask} onClose={() => setAsk(null)} onPick={go2} />
       <CircuitStartSheet open={circuitOpen} onClose={() => setCircuitOpen(false)} />
       <ActivitySheet open={actOpen} onClose={() => setActOpen(false)} />
+      <SkipSheet open={skip} onClose={() => setSkip(false)} />
     </main>
   );
 }
@@ -254,6 +274,8 @@ function SessionView({ id }: { id: string }) {
   const [plates, setPlates] = useState<number | null>(null);
   const [finish, setFinish] = useState(false);
   const [circuitFor, setCircuitFor] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [addToProgram, setAddToProgram] = useState(false);
 
   useEffect(() => {
     void keepScreenOn(true);
@@ -363,6 +385,55 @@ function SessionView({ id }: { id: string }) {
     });
   }
 
+  async function removeExercise(ei: number) {
+    haptic();
+    const before = getDoc<Session>(id)!.data;
+    const removed = before.exercises[ei];
+    await updateSession(id, (x) => {
+      x.exercises.splice(ei, 1);
+      return x;
+    });
+    showToast(`${exName(removed.key)} retiré de la séance`, {
+      label: 'Annuler',
+      run: () =>
+        void updateSession(id, (x) => {
+          x.exercises.splice(ei, 0, removed);
+          return x;
+        }),
+    });
+  }
+
+  async function addExercise(key: string) {
+    haptic();
+    const def = CATALOG[key];
+    const planned = { key, sets: 3, min: def?.timed ? 30 : 8, max: def?.timed ? 45 : 12, rest: defaultRest(key) };
+    const prepared = prepareExercise(planned, !!s.deload, id);
+    let at = 0;
+    await updateSession(id, (x) => {
+      // les abdos restent à la fin
+      const circuit = x.exercises.findIndex((e) => e.planned.circuit);
+      at = circuit >= 0 ? circuit : x.exercises.length;
+      x.exercises.splice(at, 0, prepared);
+      return x;
+    });
+    if (addToProgram) {
+      const program = getData<Program>('program');
+      const day = program?.days.find((d) => d.id === s.dayId);
+      if (program && day) {
+        const next = structuredClone(program);
+        const nd = next.days.find((d) => d.id === s.dayId)!;
+        const c = nd.exercises.findIndex((e) => e.circuit);
+        nd.exercises.splice(c >= 0 ? c : nd.exercises.length, 0, planned);
+        await putDoc('program', 'program', next);
+      }
+    }
+    setAdding(false);
+    setAddToProgram(false);
+    setExpanded((m) => ({ ...m, [at]: true }));
+    showToast(`${exName(key)} ajouté${addToProgram ? ' à la séance et au programme' : ' à la séance'}`);
+    setTimeout(() => document.getElementById('ex-' + at)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+  }
+
   const mm = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
 
   return (
@@ -422,6 +493,7 @@ function SessionView({ id }: { id: string }) {
           onAddSet={() => addSet(ei)}
           onRemoveSet={() => removeSet(ei)}
           onReplace={() => setReplace(ei)}
+          onRemove={() => removeExercise(ei)}
           onPlates={() => setPlates(ei)}
           onWarm={(i) =>
             void updateSession(id, (x) => {
@@ -435,8 +507,24 @@ function SessionView({ id }: { id: string }) {
         )
       )}
 
+      <button className="btn ghost press" onClick={() => setAdding(true)}>
+        <Icon name="plus" size={18} />
+        Ajouter un exercice
+      </button>
+
       {rest && <RestBar />}
 
+      <ExercisePicker
+        open={adding}
+        onClose={() => setAdding(false)}
+        onPick={addExercise}
+        footer={
+          <label className="row small" style={{ gap: 10, minHeight: 44 }}>
+            <input type="checkbox" checked={addToProgram} onChange={(e) => setAddToProgram(e.target.checked)} style={{ width: 22, minHeight: 22, accentColor: 'var(--brand-ink)' }} />
+            L’ajouter aussi à mon programme ({s.title})
+          </label>
+        }
+      />
       <SetEditor sid={id} session={s} edit={edit} onClose={() => setEdit(null)} />
       <ReplaceSheet sid={id} session={s} index={replace} onClose={() => setReplace(null)} />
       <PlatesSheet session={s} index={plates} onClose={() => setPlates(null)} />
@@ -464,6 +552,7 @@ function ExerciseCard({
   onAddSet,
   onRemoveSet,
   onReplace,
+  onRemove,
   onPlates,
   onWarm,
 }: {
@@ -480,6 +569,7 @@ function ExerciseCard({
   onAddSet: () => void;
   onRemoveSet: () => void;
   onReplace: () => void;
+  onRemove: () => void;
   onPlates: () => void;
   onWarm: (i: number) => void;
 }) {
@@ -611,10 +701,14 @@ function ExerciseCard({
                 Série
               </button>
             )}
-            {(def?.alternatives.length ?? 0) > 0 && (
-              <button className="chip press" onClick={onReplace}>
-                <Icon name="swap" size={16} />
-                Remplacer
+            <button className="chip press" onClick={onReplace}>
+              <Icon name="swap" size={16} />
+              Changer
+            </button>
+            {!ex.sets.some((x) => x.done) && (
+              <button className="chip press" onClick={onRemove}>
+                <Icon name="trash" size={16} />
+                Retirer
               </button>
             )}
             {def?.equipment === 'barre' && (
@@ -748,15 +842,19 @@ function ReplaceSheet({ sid, session, index, onClose }: { sid: string; session: 
   const def = ex ? CATALOG[ex.key] : undefined;
   const options = useMemo(() => {
     if (!def) return [];
-    const alt = def.alternatives.map((k) => CATALOG[k]).filter(Boolean);
-    const same = Object.values(CATALOG).filter((c) => c.muscle === def.muscle && c.key !== def.key && !def.alternatives.includes(c.key));
-    return [...alt, ...same];
+    const alt = def.alternatives.filter((k) => CATALOG[k]);
+    const same = Object.values(CATALOG)
+      .filter((c) => c.muscle === def.muscle && c.key !== def.key && !alt.includes(c.key) && !c.circuit)
+      .map((c) => c.key);
+    return [...alt, ...same].slice(0, 8);
   }, [def?.key]);
 
   async function pick(key: string) {
     if (index === null || !ex) return;
     haptic();
-    const prepared = prepareExercise({ ...ex.planned, key }, !!session.deload, sid);
+    const def2 = CATALOG[key];
+    const planned = def2?.timed && !CATALOG[ex.key]?.timed ? { ...ex.planned, key, min: 30, max: 45 } : { ...ex.planned, key };
+    const prepared = prepareExercise(planned, !!session.deload, sid);
     await updateSession(sid, (x) => {
       x.exercises[index] = { ...prepared, swappedFrom: ex.key };
       return x;
@@ -775,30 +873,19 @@ function ReplaceSheet({ sid, session, index, onClose }: { sid: string; session: 
   }
 
   return (
-    <Sheet open={index !== null} onClose={onClose} title="Remplacer l’exercice">
-      {ex && (
-        <>
-          <p className="small muted" style={{ margin: 0 }}>
-            Machine prise ou matériel absent ? Choisis un exercice qui travaille les mêmes muscles ({def?.muscle.toLowerCase()}).
-          </p>
-          <div className="card tight" style={{ boxShadow: 'none', background: 'var(--card2)' }}>
-            {options.map((o) => (
-              <button key={o.key} className="list-row press" onClick={() => pick(o.key)}>
-                <div className="grow col" style={{ gap: 2 }}>
-                  <span style={{ fontWeight: 600 }}>{o.name}</span>
-                  <span className="small muted">{o.equipment}</span>
-                </div>
-                <Icon name="right" style={{ color: 'var(--ink3)' }} />
-              </button>
-            ))}
-          </div>
-          <label className="row small" style={{ gap: 10, minHeight: 44 }}>
-            <input type="checkbox" checked={inProgram} onChange={(e) => setInProgram(e.target.checked)} style={{ width: 22, minHeight: 22, accentColor: 'var(--brand-ink)' }} />
-            Le remplacer aussi dans mon programme
-          </label>
-        </>
-      )}
-    </Sheet>
+    <ExercisePicker
+      open={index !== null}
+      onClose={onClose}
+      onPick={pick}
+      title={ex ? `Changer : ${exName(ex.key)}` : 'Changer l’exercice'}
+      first={def ? { label: `Pour les mêmes muscles (${def.muscle.toLowerCase()})`, keys: options } : undefined}
+      footer={
+        <label className="row small" style={{ gap: 10, minHeight: 44 }}>
+          <input type="checkbox" checked={inProgram} onChange={(e) => setInProgram(e.target.checked)} style={{ width: 22, minHeight: 22, accentColor: 'var(--brand-ink)' }} />
+          Le remplacer aussi dans mon programme
+        </label>
+      }
+    />
   );
 }
 

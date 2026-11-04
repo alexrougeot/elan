@@ -5,7 +5,7 @@ import { dayKey } from './dates';
 import type { Profile } from './nutrition';
 import type { CircuitPlan } from './conditioning';
 
-export type ActivityType = 'course' | 'circuit' | 'velo' | 'natation' | 'marche' | 'autre';
+export type ActivityType = 'course' | 'circuit' | 'cours' | 'velo' | 'natation' | 'marche' | 'autre';
 export type Activity = {
   date: string;
   type: ActivityType;
@@ -46,6 +46,7 @@ export type Activity = {
 export const ACTIVITY: Record<ActivityType, { label: string; icon: string; distance: boolean; met: number }> = {
   course: { label: 'Course', icon: 'run', distance: true, met: 9.8 },
   circuit: { label: 'Type Hyrox', icon: 'bolt', distance: false, met: 9 },
+  cours: { label: 'Cours collectif', icon: 'users', distance: false, met: 7 },
   velo: { label: 'Vélo', icon: 'run', distance: true, met: 7.5 },
   natation: { label: 'Natation', icon: 'drop', distance: true, met: 7 },
   marche: { label: 'Marche', icon: 'run', distance: true, met: 3.8 },

@@ -4,7 +4,8 @@ import { getData, useStoreVersion } from '../lib/store';
 import { addDays, dayKey, fmtKg, fmtNum, hhmm, longDate, minutesOf, nowMinutes, parseDay, weekStart, weekday } from '../lib/dates';
 import { currentWeight, entryMacros, foodsOn, getTargets, isSunday, mealTarget, runWeeklyAdjustment, sum, totalsOn, undoAdjustment, type Profile } from '../lib/nutrition';
 import { estimateMinutes, exName } from '../lib/program';
-import { activeSession, extraFor, getProgram, planFor, sessionToday } from '../lib/workout';
+import { activeSession, extraFor, getMoves, getProgram, planFor, sessionToday, undoSkip, usualPlan } from '../lib/workout';
+import SkipSheet from '../components/SkipSheet';
 import { isDeloadWeek, sessions } from '../lib/coach';
 import { useSyncStatus } from '../lib/sync';
 import { getLink, healthForSession, healthLine, healthOn, runShortcut } from '../lib/health';
@@ -42,6 +43,11 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   const [weighIn, setWeighIn] = useState(false);
   const [review, setReview] = useState(false);
   const [actOpen, setActOpen] = useState(false);
+  const [skipOpen, setSkipOpen] = useState(false);
+  const moves = getMoves();
+  const usual = usualPlan(program);
+  const skipped = !plan && !!usual && moves[today] === null && !sessionToday(usual.id);
+  const movedTo = skipped ? Object.keys(moves).find((k) => k > today && moves[k] === usual!.id) : undefined;
   const todayActs = activitiesOn(today);
   const weekend = [6, 7].includes(weekday(parseDay(today)));
 
@@ -73,13 +79,27 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   const monday = weekStart(today);
   const doneDates = new Set(sessions().filter((s) => s.data.endedAt).map((s) => s.data.date));
   const actDates = new Set(activities().map((a) => a.data.date));
-  const plannedDays = new Set(program?.days.map((d) => d.weekday) ?? []);
+
   const extraDays = new Set(program?.extras.map((d) => d.weekday) ?? []);
   const week = Array.from({ length: 7 }, (_, i) => {
     const key = addDays(monday, i);
     const wd = weekday(parseDay(key));
     const started = !program || key >= program.startDate;
-    const state = doneDates.has(key) ? 'done' : actDates.has(key) ? 'activity' : plannedDays.has(wd) && started ? (key < today ? 'missed' : 'planned') : extraDays.has(wd) && started ? 'extra' : '';
+    const planned = !!planFor(program, parseDay(key));
+    const skip = !planned && !!usualPlan(program, parseDay(key)) && moves[key] === null;
+    const state = doneDates.has(key)
+      ? 'done'
+      : actDates.has(key)
+        ? 'activity'
+        : planned && started
+          ? key < today
+            ? 'missed'
+            : 'planned'
+          : skip
+            ? 'skipped'
+            : extraDays.has(wd) && started
+              ? 'extra'
+              : '';
     return { key, wd, state, day: parseDay(key).getDate() };
   });
   const doneThisWeek = week.filter((d) => d.state === 'done').length;
@@ -173,7 +193,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
               Séance du jour
             </span>
             <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.01em' }}>
-              {active ? active.data.title : plan ? `${plan.title}${plan.subtitle ? ' · ' + plan.subtitle : ''}` : weekend ? 'Week-end libre' : 'Repos'}
+              {active ? active.data.title : plan ? `${plan.title}${plan.subtitle ? ' · ' + plan.subtitle : ''}` : skipped ? `${usual!.title} · ${movedTo ? 'décalée' : 'sautée'}` : weekend ? 'Week-end libre' : 'Repos'}
             </span>
           </div>
           {done?.data.endedAt ? (
@@ -201,7 +221,21 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
             )}
           </div>
         )}
-        {!plan && !active && !(weekend && todayActs.length === 0) && (
+        {skipped && (
+          <div className="row between" style={{ gap: 8 }}>
+            <span className="small muted">{movedTo ? `Tu la fais ${longDate(movedTo).split(' ').slice(0, 2).join(' ').toLowerCase()} à la place.` : 'Pas de séance aujourd’hui, profite.'}</span>
+            <button className="chip press" onClick={() => void undoSkip(today)}>
+              Annuler
+            </button>
+          </div>
+        )}
+        {skipped && todayActs.length === 0 && (
+          <button className="btn soft press" onClick={() => setActOpen(true)}>
+            <Icon name="users" size={19} />
+            Noter mon cours collectif
+          </button>
+        )}
+        {!plan && !active && !skipped && !(weekend && todayActs.length === 0) && (
           <span className="small muted">{todayActs.length ? 'Activité enregistrée, bien joué. Le reste de la journée : on récupère.' : extra ? extra.title : 'Pas de séance prévue aujourd’hui : récupère bien.'}</span>
         )}
         {!plan && !active && weekend && todayActs.length === 0 && (
@@ -245,10 +279,17 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
           );
         })()}
         {(plan || active) && !done?.data.endedAt && (
-          <button className="btn brand press" style={{ minHeight: 48 }} onClick={() => go('workout')}>
-            <Icon name={active ? 'timer' : 'dumbbell'} size={20} />
-            {active ? 'Reprendre la séance' : 'Commencer'}
-          </button>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn brand press grow" style={{ minHeight: 48 }} onClick={() => go('workout')}>
+              <Icon name={active ? 'timer' : 'dumbbell'} size={20} />
+              {active ? 'Reprendre la séance' : 'Commencer'}
+            </button>
+            {!active && (
+              <button className="btn ghost press" style={{ minHeight: 48, width: 'auto', paddingInline: 14 }} onClick={() => setSkipOpen(true)}>
+                Pas aujourd’hui
+              </button>
+            )}
+          </div>
         )}
         {extra && plan && <span className="small muted">Et aussi : {extra.title.toLowerCase()}</span>}
       </section>
@@ -318,8 +359,8 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
             {week.map((d) => (
               <div key={d.key} className={'week-day' + (d.key === today ? ' today' : '')}>
                 <span>{'LMMJVSD'[d.wd - 1]}</span>
-                <div className={'week-dot ' + d.state} aria-label={`${d.day}, ${d.state === 'done' ? 'séance faite' : d.state === 'planned' ? 'séance prévue' : d.state === 'missed' ? 'séance manquée' : d.state === 'extra' ? 'cours collectif' : d.state === 'activity' ? 'activité libre' : 'repos'}`}>
-                  {d.state === 'done' ? <Icon name="check" size={16} stroke={2.8} /> : d.state === 'activity' ? <Icon name="run" size={16} /> : d.state === 'extra' ? <Icon name="flame" size={15} /> : d.day}
+                <div className={'week-dot ' + d.state} aria-label={`${d.day}, ${d.state === 'done' ? 'séance faite' : d.state === 'planned' ? 'séance prévue' : d.state === 'missed' ? 'séance manquée' : d.state === 'extra' ? 'cours collectif' : d.state === 'activity' ? 'activité libre' : d.state === 'skipped' ? 'séance sautée' : 'repos'}`}>
+                  {d.state === 'done' ? <Icon name="check" size={16} stroke={2.8} /> : d.state === 'activity' ? <Icon name="run" size={16} /> : d.state === 'extra' ? <Icon name="flame" size={15} /> : d.state === 'skipped' ? '–' : d.day}
                 </div>
               </div>
             ))}
@@ -457,7 +498,8 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
 
       <WeighInSheet open={weighIn} onClose={() => setWeighIn(false)} />
       <WeeklyReview open={review} onClose={() => setReview(false)} />
-      <ActivitySheet open={actOpen} onClose={() => setActOpen(false)} />
+      <ActivitySheet open={actOpen} onClose={() => setActOpen(false)} initial={skipped ? 'cours' : undefined} duoDefault={skipped} />
+      <SkipSheet open={skipOpen} onClose={() => setSkipOpen(false)} />
     </main>
   );
 }

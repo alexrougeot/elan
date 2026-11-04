@@ -1,4 +1,5 @@
 // Catalogue d'exercices et programmes types.
+import { allOf, putDoc, uid } from './store';
 
 export type Equipment = 'barre' | 'haltères' | 'machine' | 'poulie' | 'poids du corps';
 
@@ -15,6 +16,8 @@ export type ExerciseDef = {
   circuit?: boolean;
   /** progression de charge quand la fourchette est validée */
   increment: number;
+  /** créé par l'utilisateur */
+  custom?: boolean;
   alternatives: string[];
 };
 
@@ -120,6 +123,41 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('windshield', 'Essuie-glaces', 'Abdos', 'poids du corps', false, false, ['russian_twist'], { timed: true, increment: 0 }),
     ex('bear_hold', 'Position de l’ours', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
     ex('abs_circuit', 'Abdos · 10 min', 'Abdos', 'poids du corps', false, false, [], { timed: true, increment: 0, circuit: true }),
+    // Pour compléter : les classiques de salle
+    ex('pec_deck', 'Pec deck (butterfly)', 'Pectoraux', 'machine', false, false, ['cable_fly', 'db_fly']),
+    ex('cable_fly', 'Écarté à la poulie', 'Pectoraux', 'poulie', false, false, ['pec_deck', 'db_fly'], { increment: 1.25 }),
+    ex('db_fly', 'Écarté couché haltères', 'Pectoraux', 'haltères', false, false, ['pec_deck', 'cable_fly'], { increment: 1 }),
+    ex('decline_bench', 'Développé décliné', 'Pectoraux', 'barre', false, true, ['dips', 'bench']),
+    ex('pushup', 'Pompes', 'Pectoraux', 'poids du corps', false, true, ['bench', 'db_bench'], { increment: 0 }),
+    ex('pullover', 'Pull-over', 'Dos', 'haltères', false, false, ['lat_pulldown', 'straight_arm'], { increment: 2 }),
+    ex('straight_arm', 'Tirage bras tendus poulie', 'Dos', 'poulie', false, false, ['pullover', 'lat_pulldown']),
+    ex('close_pulldown', 'Tirage vertical prise serrée', 'Dos', 'poulie', false, true, ['lat_pulldown', 'pullup']),
+    ex('chest_row', 'Rowing poitrine appuyée', 'Dos', 'haltères', false, true, ['db_row', 'machine_row'], { increment: 2 }),
+    ex('hyperext', 'Extensions lombaires', 'Dos', 'poids du corps', false, false, ['good_morning', 'rdl'], { increment: 0 }),
+    ex('shrug', 'Shrugs (trapèzes)', 'Dos', 'haltères', false, false, ['row'], { increment: 2 }),
+    ex('face_pull', 'Face pull', 'Épaules', 'poulie', false, false, ['reverse_fly', 'rear_delt_machine'], { increment: 1.25 }),
+    ex('reverse_fly', 'Oiseau haltères', 'Épaules', 'haltères', false, false, ['face_pull', 'rear_delt_machine'], { increment: 1 }),
+    ex('rear_delt_machine', 'Arrière d’épaule machine', 'Épaules', 'machine', false, false, ['reverse_fly', 'face_pull']),
+    ex('front_raise', 'Élévations frontales', 'Épaules', 'haltères', false, false, ['lateral'], { increment: 1 }),
+    ex('upright_row', 'Rowing menton', 'Épaules', 'barre', false, false, ['lateral', 'cable_lateral']),
+    ex('arnold', 'Développé Arnold', 'Épaules', 'haltères', false, true, ['db_ohp', 'machine_shoulder'], { increment: 2 }),
+    ex('preacher_curl', 'Curl pupitre', 'Biceps', 'barre', false, false, ['ez_curl', 'cable_curl']),
+    ex('concentration_curl', 'Curl concentré', 'Biceps', 'haltères', false, false, ['curl', 'hammer_curl'], { increment: 1 }),
+    ex('spider_curl', 'Curl spider', 'Biceps', 'haltères', false, false, ['incline_curl', 'preacher_curl'], { increment: 1 }),
+    ex('rope_pushdown', 'Extension triceps corde', 'Triceps', 'poulie', false, false, ['triceps', 'overhead_triceps']),
+    ex('db_triceps', 'Extension triceps haltère', 'Triceps', 'haltères', false, false, ['overhead_triceps', 'skullcrusher'], { increment: 1 }),
+    ex('kickback', 'Kickback triceps', 'Triceps', 'haltères', false, false, ['triceps', 'db_triceps'], { increment: 1 }),
+    ex('close_bench', 'Développé couché prise serrée', 'Triceps', 'barre', false, true, ['dips', 'skullcrusher']),
+    ex('machine_dips', 'Dips machine', 'Triceps', 'machine', false, true, ['dips', 'triceps']),
+    ex('front_squat', 'Squat avant', 'Quadriceps', 'barre', true, true, ['squat', 'hack_squat']),
+    ex('smith_squat', 'Squat à la Smith machine', 'Quadriceps', 'machine', true, true, ['squat', 'hack_squat']),
+    ex('lunge_front', 'Fentes avant', 'Quadriceps et fessiers', 'haltères', true, true, ['lunges', 'bulgarian'], { increment: 2 }),
+    ex('sumo_deadlift', 'Soulevé de terre sumo', 'Dos et jambes', 'barre', true, true, ['deadlift', 'trap_bar']),
+    ex('abductor', 'Abducteurs machine', 'Fessiers', 'machine', true, false, ['glute_machine', 'hip_thrust']),
+    ex('adductor', 'Adducteurs machine', 'Quadriceps', 'machine', true, false, ['goblet_squat']),
+    ex('cable_kickback', 'Kickback fessier poulie', 'Fessiers', 'poulie', true, false, ['glute_machine', 'hip_thrust'], { increment: 1.25 }),
+    ex('crunch_machine', 'Crunch machine', 'Abdos', 'machine', false, false, ['crunch', 'cable_crunch']),
+    ex('cable_crunch', 'Crunch à la poulie', 'Abdos', 'poulie', false, false, ['crunch_machine', 'crunch']),
   ].map((e) => [e.key, e])
 );
 
@@ -336,6 +374,33 @@ export function emptyProgram(startDate: string): Program {
 
 export function exName(key: string) {
   return CATALOG[key]?.name ?? key;
+}
+
+// ---------------- Exercices perso ----------------
+export const MUSCLES = ['Pectoraux', 'Dos', 'Épaules', 'Biceps', 'Triceps', 'Quadriceps', 'Ischios', 'Fessiers', 'Mollets', 'Abdos'] as const;
+export const EQUIPMENTS: Equipment[] = ['barre', 'haltères', 'machine', 'poulie', 'poids du corps'];
+export type CustomExercise = { name: string; muscle: string; equipment: Equipment; timed?: boolean };
+
+/** Ajoute au catalogue les exercices créés par l'utilisateur */
+export function loadCustomExercises() {
+  for (const d of allOf<CustomExercise>('customex')) {
+    const c = d.data;
+    const key = d.id.replace('customex:', 'perso_');
+    if (CATALOG[key]?.name === c.name && CATALOG[key]?.muscle === c.muscle && CATALOG[key]?.equipment === c.equipment) continue;
+    const lower = ['Quadriceps', 'Ischios', 'Fessiers', 'Mollets'].includes(c.muscle);
+    CATALOG[key] = ex(key, c.name, c.muscle, c.equipment, lower, c.equipment === 'barre', [], {
+      timed: c.timed || undefined,
+      increment: c.timed || c.equipment === 'poids du corps' ? 0 : c.equipment === 'haltères' ? (lower ? 2 : 1) : lower ? 5 : 2.5,
+      custom: true,
+    });
+  }
+}
+
+export async function createCustomExercise(c: CustomExercise) {
+  const id = uid();
+  await putDoc('customex:' + id, 'customex', c);
+  loadCustomExercises();
+  return 'perso_' + id;
 }
 
 /** Durée estimée d'une séance, en minutes (échauffement compris) */

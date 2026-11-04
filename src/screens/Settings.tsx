@@ -9,12 +9,15 @@ import { currentSubscription, disablePush, enablePush, pushSupported } from '../
 import { isIOS, isStandalone } from '../lib/device';
 import { createLink, getLink, linkUrl, runShortcut, SHORTCUT_NAME } from '../lib/health';
 import { Icon, Sheet, showToast } from '../components/ui';
+import ExercisePicker from '../components/ExercisePicker';
 
-export default function Settings({ open, onClose }: { open: boolean; onClose: () => void }) {
+export type SettingsStart = { page: 'program'; dayId?: string } | null;
+
+export default function Settings({ open, onClose, start }: { open: boolean; onClose: () => void; start?: SettingsStart }) {
   useStoreVersion();
   const [page, setPage] = useState<'main' | 'profile' | 'nutrition' | 'program' | 'watch'>('main');
   useEffect(() => {
-    if (open) setPage('main');
+    if (open) setPage(start?.page ?? 'main');
   }, [open]);
 
   const titles = { main: 'Réglages', profile: 'Profil', nutrition: 'Objectifs et repas', program: 'Programme', watch: 'Montre et Santé' };
@@ -36,7 +39,7 @@ export default function Settings({ open, onClose }: { open: boolean; onClose: ()
       {page === 'main' && <MainPage go={setPage} />}
       {page === 'profile' && <ProfilePage />}
       {page === 'nutrition' && <NutritionPage />}
-      {page === 'program' && <ProgramPage />}
+      {page === 'program' && <ProgramPage startDay={open ? start?.dayId : undefined} />}
       {page === 'watch' && <WatchPage />}
     </Sheet>
   );
@@ -405,9 +408,9 @@ function NutritionPage() {
 }
 
 // ---------------- Programme ----------------
-function ProgramPage() {
+function ProgramPage({ startDay }: { startDay?: string }) {
   const program = getData<Program>('program')!;
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(startDay ?? null);
   const [confirmReset, setConfirmReset] = useState<string | null>(null);
   const day = program.days.find((d) => d.id === editing);
 
@@ -508,15 +511,35 @@ function ProgramPage() {
 
 function DayEditor({ program, day, onBack, onSave }: { program: Program; day: ProgramDay; onBack: () => void; onSave: (p: Program) => Promise<void> }) {
   const [picking, setPicking] = useState(false);
-  const [q, setQ] = useState('');
+  const [swap, setSwap] = useState<number | null>(null);
 
   function update(fn: (d: ProgramDay) => ProgramDay) {
     const next = { ...program, days: program.days.map((d) => (d.id === day.id ? fn(structuredClone(d)) : d)).sort((a, b) => a.weekday - b.weekday) };
     void onSave(next);
   }
 
-  const muscles = [...new Set(Object.values(CATALOG).map((c) => c.muscle))];
-  const found = Object.values(CATALOG).filter((c) => !c.circuit && (!q || c.name.toLowerCase().includes(q.toLowerCase())));
+  function add(key: string) {
+    const c = CATALOG[key];
+    update((d) => {
+      const planned = { key, sets: 3, min: c?.timed ? 30 : 8, max: c?.timed ? 45 : 12, rest: defaultRest(key) };
+      const at = d.exercises.findIndex((e) => e.circuit);
+      d.exercises.splice(at >= 0 ? at : d.exercises.length, 0, planned);
+      return d;
+    });
+    setPicking(false);
+    showToast(`${exName(key)} ajouté`);
+  }
+
+  function replace(key: string) {
+    if (swap === null) return;
+    const old = day.exercises[swap];
+    update((d) => {
+      d.exercises[swap] = { ...d.exercises[swap], key };
+      return d;
+    });
+    setSwap(null);
+    showToast(`${exName(old.key)} remplacé par ${exName(key)}`);
+  }
 
   return (
     <>
@@ -550,6 +573,11 @@ function DayEditor({ program, day, onBack, onSave }: { program: Program; day: Pr
           <div className="row between">
             <span style={{ fontWeight: 700 }}>{exName(e.key)}</span>
             <div className="row" style={{ gap: 4 }}>
+              {!e.circuit && (
+                <button className="icon-btn plain press" aria-label={`Changer ${exName(e.key)}`} onClick={() => setSwap(i)}>
+                  <Icon name="swap" size={18} />
+                </button>
+              )}
               <button className="icon-btn plain press" aria-label="Monter" disabled={i === 0} onClick={() => update((d) => ([d.exercises[i - 1], d.exercises[i]] = [d.exercises[i], d.exercises[i - 1]], d))}>
                 <Icon name="up" size={18} />
               </button>
@@ -622,40 +650,18 @@ function DayEditor({ program, day, onBack, onSave }: { program: Program; day: Pr
         Supprimer cette séance
       </button>
 
-      <Sheet open={picking} onClose={() => setPicking(false)} title="Ajouter un exercice" full>
-        <label>
-          <span className="sr-only">Chercher</span>
-          <input placeholder="Chercher un exercice" value={q} onChange={(e) => setQ(e.target.value)} />
-        </label>
-        {muscles.map((m) => {
-          const list = found.filter((c) => c.muscle === m);
-          if (list.length === 0) return null;
-          return (
-            <div key={m} className="col" style={{ gap: 2 }}>
-              <span className="small muted" style={{ fontWeight: 600 }}>
-                {m}
-              </span>
-              {list.map((c) => (
-                <button
-                  key={c.key}
-                  className="list-row press"
-                  style={{ margin: '0 -12px', width: 'calc(100% + 24px)' }}
-                  onClick={() => {
-                    update((d) => ({ ...d, exercises: [...d.exercises, { key: c.key, sets: 3, min: c.timed ? 30 : 8, max: c.timed ? 45 : 12, rest: defaultRest(c.key) }] }));
-                    setPicking(false);
-                    setQ('');
-                  }}
-                >
-                  <span className="grow" style={{ fontWeight: 600 }}>
-                    {c.name}
-                  </span>
-                  <span className="small muted">{c.equipment}</span>
-                </button>
-              ))}
-            </div>
-          );
-        })}
-      </Sheet>
+      <ExercisePicker open={picking} onClose={() => setPicking(false)} onPick={add} />
+      <ExercisePicker
+        open={swap !== null}
+        onClose={() => setSwap(null)}
+        onPick={replace}
+        title={swap !== null ? `Changer : ${exName(day.exercises[swap]?.key ?? '')}` : 'Changer'}
+        first={
+          swap !== null && CATALOG[day.exercises[swap]?.key]
+            ? { label: 'Pour les mêmes muscles', keys: Object.values(CATALOG).filter((c) => c.muscle === CATALOG[day.exercises[swap].key].muscle && c.key !== day.exercises[swap].key && !c.circuit).map((c) => c.key).slice(0, 8) }
+            : undefined
+        }
+      />
     </>
   );
 }
