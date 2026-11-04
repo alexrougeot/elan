@@ -11,6 +11,8 @@ export type ExerciseDef = {
   compound: boolean;
   /** répétitions en secondes (gainage) */
   timed?: boolean;
+  /** circuit chronométré (abdos) */
+  circuit?: boolean;
   /** progression de charge quand la fourchette est validée */
   increment: number;
   alternatives: string[];
@@ -93,10 +95,40 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('plank', 'Gainage', 'Abdos', 'poids du corps', false, false, ['side_plank', 'dead_bug'], { timed: true, increment: 0 }),
     ex('side_plank', 'Gainage latéral', 'Abdos', 'poids du corps', false, false, ['plank', 'dead_bug'], { timed: true, increment: 0 }),
     ex('dead_bug', 'Dead bug', 'Abdos', 'poids du corps', false, false, ['plank', 'side_plank'], { increment: 0 }),
+    // Bras, pour aller plus loin
+    ex('ez_curl', 'Curl barre EZ', 'Biceps', 'barre', false, false, ['barbell_curl', 'curl', 'cable_curl']),
+    ex('hammer_curl', 'Curl marteau', 'Biceps', 'haltères', false, false, ['curl', 'cable_curl'], { increment: 1 }),
+    ex('curl_21', 'Curl 21 (7 bas + 7 haut + 7 complets)', 'Biceps', 'barre', false, false, ['ez_curl', 'curl']),
+    ex('diamond_pushup', 'Pompes diamant', 'Triceps', 'poids du corps', false, true, ['dips', 'triceps'], { increment: 0 }),
+    // Abdos (en circuit, 40 s par exercice)
+    ex('crunch', 'Crunch', 'Abdos', 'poids du corps', false, false, ['reverse_crunch'], { timed: true, increment: 0 }),
+    ex('leg_raise', 'Relevé de jambes au sol', 'Abdos', 'poids du corps', false, false, ['hanging_leg_raise'], { timed: true, increment: 0 }),
+    ex('hanging_leg_raise', 'Relevé de jambes suspendu', 'Abdos', 'poids du corps', false, false, ['leg_raise'], { timed: true, increment: 0 }),
+    ex('russian_twist', 'Russian twist', 'Abdos', 'poids du corps', false, false, ['bicycle_crunch'], { timed: true, increment: 0 }),
+    ex('mountain_climber', 'Mountain climbers', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
+    ex('hollow_hold', 'Creux (hollow hold)', 'Abdos', 'poids du corps', false, false, ['dead_bug'], { timed: true, increment: 0 }),
+    ex('commando_plank', 'Planche commando', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
+    ex('bicycle_crunch', 'Crunch vélo', 'Abdos', 'poids du corps', false, false, ['crunch'], { timed: true, increment: 0 }),
+    ex('ab_wheel', 'Roue abdominale', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
+    ex('v_up', 'V-ups', 'Abdos', 'poids du corps', false, false, ['crunch'], { timed: true, increment: 0 }),
+    ex('reverse_crunch', 'Crunch inversé', 'Abdos', 'poids du corps', false, false, ['leg_raise'], { timed: true, increment: 0 }),
+    ex('abs_circuit', 'Abdos · 10 min', 'Abdos', 'poids du corps', false, false, [], { timed: true, increment: 0, circuit: true }),
   ].map((e) => [e.key, e])
 );
 
-export type PlannedExercise = { key: string; sets: number; min: number; max: number; rest: number };
+export type Circuit = { keys: string[]; work: number; rest: number; rounds: number };
+export type PlannedExercise = {
+  key: string;
+  sets: number;
+  min: number;
+  max: number;
+  rest: number;
+  /** même lettre = superset : on enchaîne, repos après le dernier */
+  group?: string;
+  /** consigne en plus (dégressive…) */
+  note?: string;
+  circuit?: Circuit;
+};
 export type ProgramDay = { id: string; weekday: number; title: string; subtitle: string; exercises: PlannedExercise[] };
 export type Program = {
   name: string;
@@ -106,64 +138,106 @@ export type Program = {
   days: ProgramDay[];
   /** activités qui ne comptent pas comme séance (cours collectif…) */
   extras: { weekday: number; title: string }[];
+  version?: number;
 };
 
 export function defaultRest(key: string) {
   const e = CATALOG[key];
   if (!e) return 90;
-  if (['squat', 'bench', 'deadlift', 'rdl', 'ohp', 'row', 'trap_bar', 'incline_bench', 'hip_thrust'].includes(key)) return 150;
+  if (['deadlift', 'trap_bar'].includes(key)) return 180;
+  if (['squat', 'bench', 'rdl', 'ohp', 'row', 'incline_bench', 'hip_thrust'].includes(key)) return 150;
   if (e.compound) return 120;
   return 75;
 }
 
-const p = (key: string, sets: number, min: number, max: number): PlannedExercise => ({
+const p = (key: string, sets: number, min: number, max: number, extra: Partial<PlannedExercise> = {}): PlannedExercise => ({
   key,
   sets,
   min,
   max,
   rest: defaultRest(key),
+  ...extra,
 });
+
+/** Superset : deux exercices enchaînés, repos après le second */
+const ss = (group: string, rest: number, a: PlannedExercise, b: PlannedExercise): PlannedExercise[] => [
+  { ...a, group, rest },
+  { ...b, group, rest },
+];
+
+export const ABS: Record<string, string[]> = {
+  a: ['crunch', 'leg_raise', 'plank', 'russian_twist', 'mountain_climber'],
+  b: ['side_plank', 'dead_bug', 'hollow_hold', 'commando_plank', 'side_plank'],
+  c: ['hanging_leg_raise', 'bicycle_crunch', 'ab_wheel', 'v_up', 'plank'],
+  d: ['mountain_climber', 'side_plank', 'russian_twist', 'reverse_crunch', 'plank'],
+};
+
+export const abs = (keys: string[]): PlannedExercise => ({
+  key: 'abs_circuit',
+  sets: 2,
+  min: 2,
+  max: 2,
+  rest: 0,
+  circuit: { keys, work: 40, rest: 20, rounds: 2 },
+});
+
+export const PROGRAM_VERSION = 2;
 
 export function upperLowerProgram(startDate: string): Program {
   return {
     name: 'Haut / bas · 4 séances',
     startDate,
     deloadEvery: 7,
+    version: PROGRAM_VERSION,
     days: [
       {
         id: 'haut-a',
         weekday: 1,
         title: 'Haut A',
-        subtitle: 'lourd',
-        exercises: [p('bench', 4, 6, 8), p('row', 4, 6, 8), p('ohp', 3, 8, 10), p('pullup', 3, 8, 10), p('curl', 2, 10, 12), p('triceps', 2, 10, 12)],
+        subtitle: 'force et bras',
+        exercises: [
+          p('bench', 4, 6, 8),
+          p('row', 4, 6, 8),
+          ...ss('A', 90, p('db_ohp', 3, 8, 10), p('pullup', 3, 8, 10)),
+          ...ss('B', 75, p('ez_curl', 4, 8, 10), p('skullcrusher', 4, 8, 10)),
+          ...ss('C', 75, p('hammer_curl', 3, 10, 12), p('triceps', 3, 12, 15, { note: 'Dernière série en dégressive : enlève 30 % et repars sans pause jusqu’à l’échec.' })),
+          abs(ABS.a),
+        ],
       },
       {
         id: 'bas-a',
         weekday: 3,
         title: 'Bas A',
-        subtitle: 'lourd',
-        exercises: [p('squat', 4, 6, 8), p('rdl', 3, 8, 10), p('leg_press', 3, 10, 12), p('leg_curl', 3, 10, 12), p('calf', 3, 12, 15)],
+        subtitle: 'force',
+        exercises: [p('squat', 4, 6, 8), p('rdl', 3, 8, 10), p('leg_press', 3, 10, 12), ...ss('A', 75, p('leg_curl', 3, 10, 12), p('calf', 4, 12, 15)), abs(ABS.b)],
       },
       {
         id: 'haut-b',
         weekday: 4,
         title: 'Haut B',
-        subtitle: 'volume',
+        subtitle: 'volume et congestion',
         exercises: [
-          p('incline_db', 3, 8, 12),
-          p('lat_pulldown', 3, 10, 12),
-          p('db_row', 3, 10, 12),
-          p('lateral', 3, 12, 15),
-          p('incline_curl', 3, 10, 12),
-          p('overhead_triceps', 3, 10, 12),
+          p('incline_db', 4, 8, 12),
+          p('lat_pulldown', 4, 10, 12),
+          ...ss('A', 75, p('db_row', 3, 10, 12), p('lateral', 4, 12, 15)),
+          ...ss('B', 75, p('incline_curl', 4, 10, 12), p('overhead_triceps', 4, 10, 12)),
+          ...ss('C', 60, p('curl_21', 2, 21, 21), p('diamond_pushup', 2, 8, 20, { note: 'Au maximum de reps, en gardant les coudes serrés.' })),
+          abs(ABS.c),
         ],
       },
       {
         id: 'bas-b',
         weekday: 5,
         title: 'Bas B',
-        subtitle: 'volume',
-        exercises: [p('deadlift', 3, 5, 5), p('bulgarian', 3, 8, 10), p('leg_ext', 3, 12, 15), p('leg_curl', 3, 12, 15), p('plank', 3, 30, 60)],
+        subtitle: 'volume et bonus bras',
+        exercises: [
+          p('deadlift', 3, 5, 5),
+          p('bulgarian', 3, 8, 10, { note: 'Charge par haltère, toutes les reps d’une jambe puis l’autre.' }),
+          ...ss('A', 75, p('leg_ext', 3, 12, 15), p('leg_curl', 3, 12, 15)),
+          p('seated_calf', 3, 15, 15),
+          ...ss('B', 75, p('hammer_curl', 3, 12, 12), p('dips', 3, 8, 12)),
+          abs(ABS.d),
+        ],
       },
     ],
     extras: [{ weekday: 2, title: 'Cours cardio collectif, le soir' }],
@@ -175,31 +249,51 @@ export function fullBodyProgram(startDate: string): Program {
     name: 'Full body · 3 séances',
     startDate,
     deloadEvery: 7,
+    version: PROGRAM_VERSION,
     days: [
       {
         id: 'fb-a',
         weekday: 1,
         title: 'Full body A',
         subtitle: '',
-        exercises: [p('squat', 3, 8, 10), p('db_bench', 3, 8, 12), p('lat_pulldown', 3, 10, 12), p('hip_thrust', 3, 10, 12), p('plank', 3, 30, 45)],
+        exercises: [p('squat', 3, 8, 10), ...ss('A', 90, p('db_bench', 3, 8, 12), p('lat_pulldown', 3, 10, 12)), p('hip_thrust', 3, 10, 12), abs(ABS.a)],
       },
       {
         id: 'fb-b',
         weekday: 3,
         title: 'Full body B',
         subtitle: '',
-        exercises: [p('rdl', 3, 8, 10), p('db_ohp', 3, 8, 12), p('db_row', 3, 10, 12), p('bulgarian', 3, 8, 10), p('lateral', 3, 12, 15)],
+        exercises: [p('rdl', 3, 8, 10), ...ss('A', 90, p('db_ohp', 3, 8, 12), p('db_row', 3, 10, 12)), p('bulgarian', 3, 8, 10), p('lateral', 3, 12, 15), abs(ABS.b)],
       },
       {
         id: 'fb-c',
         weekday: 5,
         title: 'Full body C',
         subtitle: '',
-        exercises: [p('leg_press', 3, 10, 12), p('incline_db', 3, 8, 12), p('cable_row', 3, 10, 12), p('leg_curl', 3, 10, 12), p('calf', 3, 12, 15)],
+        exercises: [p('leg_press', 3, 10, 12), ...ss('A', 90, p('incline_db', 3, 8, 12), p('cable_row', 3, 10, 12)), ...ss('B', 60, p('leg_curl', 3, 10, 12), p('calf', 3, 12, 15)), abs(ABS.d)],
       },
     ],
     extras: [],
   };
+}
+
+/** L'ancien programme type, jamais modifié : on peut le remplacer par la nouvelle version */
+const OLD_SIGNATURES = [
+  'haut-a:bench,row,ohp,pullup,curl,triceps|bas-a:squat,rdl,leg_press,leg_curl,calf|haut-b:incline_db,lat_pulldown,db_row,lateral,incline_curl,overhead_triceps|bas-b:deadlift,bulgarian,leg_ext,leg_curl,plank',
+  'fb-a:squat,db_bench,lat_pulldown,hip_thrust,plank|fb-b:rdl,db_ohp,db_row,bulgarian,lateral|fb-c:leg_press,incline_db,cable_row,leg_curl,calf',
+];
+
+export function upgradedProgram(prog: Program): Program | null {
+  if ((prog.version ?? 1) >= PROGRAM_VERSION) return null;
+  const sig = prog.days.map((d) => d.id + ':' + d.exercises.map((e) => e.key).join(',')).join('|');
+  const i = OLD_SIGNATURES.indexOf(sig);
+  if (i < 0) return null;
+  const next = i === 0 ? upperLowerProgram(prog.startDate) : fullBodyProgram(prog.startDate);
+  // garder les jours choisis par l'utilisateur
+  next.days = next.days.map((d) => ({ ...d, weekday: prog.days.find((o) => o.id === d.id)?.weekday ?? d.weekday }));
+  next.deloadEvery = prog.deloadEvery;
+  next.extras = prog.extras;
+  return next;
 }
 
 export function emptyProgram(startDate: string): Program {
@@ -210,13 +304,27 @@ export function exName(key: string) {
   return CATALOG[key]?.name ?? key;
 }
 
-/** Durée estimée d'une séance, en minutes */
+/** Durée estimée d'une séance, en minutes (échauffement compris) */
 export function estimateMinutes(day: ProgramDay) {
-  let s = 0;
-  for (const e of day.exercises) {
-    const work = CATALOG[e.key]?.timed ? e.max : 40;
-    s += e.sets * (work + e.rest) + 60;
-  }
+  let s = 300;
+  const done = new Set<number>();
+  day.exercises.forEach((e, i) => {
+    if (done.has(i)) return;
+    if (e.circuit) {
+      s += e.circuit.rounds * e.circuit.keys.length * (e.circuit.work + e.circuit.rest);
+      done.add(i);
+      return;
+    }
+    const members = e.group ? day.exercises.map((x, k) => [x, k] as const).filter(([x]) => x.group === e.group) : ([[e, i]] as const);
+    let perRound = 0;
+    let rounds = 0;
+    for (const [m, k] of members) {
+      done.add(k);
+      perRound += CATALOG[m.key]?.timed ? m.max : 40;
+      rounds = Math.max(rounds, m.sets);
+    }
+    s += rounds * (perRound + e.rest) + 60;
+  });
   return Math.round(s / 60 / 5) * 5;
 }
 

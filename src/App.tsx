@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { Session as AuthSession } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
-import { getData, openStore, useStoreVersion } from './lib/store';
+import { getData, openStore, putDoc, useStoreVersion } from './lib/store';
+import { upgradedProgram, type Program } from './lib/program';
 import { startSyncLoop, syncNow } from './lib/sync';
 import type { Profile } from './lib/nutrition';
-import { Icon, LogoMark, Toasts } from './components/ui';
+import { Icon, LogoMark, Toasts, showToast } from './components/ui';
 import AuthScreen from './screens/Auth';
 import Onboarding from './screens/Onboarding';
 import Today from './screens/Today';
@@ -123,6 +124,16 @@ function Signed() {
 function Shell() {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [settings, setSettings] = useState(false);
+
+  // Programme type d'origine jamais modifié : on passe à la nouvelle version
+  useEffect(() => {
+    const prog = getData<Program>('program');
+    const next = prog ? upgradedProgram(prog) : null;
+    if (next) {
+      void putDoc('program', 'program', next);
+      showToast('Programme mis à jour : plus de bras, des supersets et 10 min d’abdos', undefined, 6000);
+    }
+  }, []);
 
   useEffect(() => {
     sessionStorage.setItem('elan.tab', tab);

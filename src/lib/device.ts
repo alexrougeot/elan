@@ -67,6 +67,31 @@ export function beep() {
   }
 }
 
+/** Bips du minuteur d'abdos : « tic » (3-2-1), « go » (effort), « pause » (repos) */
+export function tone(kind: 'tick' | 'go' | 'rest' | 'end') {
+  try {
+    if (!ctx) return;
+    const seq: [number, number, number][] =
+      kind === 'tick' ? [[0, 660, 0.07]] : kind === 'go' ? [[0, 880, 0.12], [0.16, 1175, 0.2]] : kind === 'rest' ? [[0, 520, 0.22]] : [[0, 880, 0.15], [0.2, 1046, 0.15], [0.4, 1318, 0.3]];
+    const t0 = ctx.currentTime + 0.02;
+    for (const [dt, f, d] of seq) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + dt);
+      g.gain.exponentialRampToValueAtTime(0.35, t0 + dt + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + d);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0 + dt);
+      o.stop(t0 + dt + d + 0.02);
+    }
+    if (kind !== 'tick' && 'vibrate' in navigator && typeof navigator.vibrate === 'function') navigator.vibrate(kind === 'go' ? [80, 60, 80] : 120);
+  } catch {
+    /* rien */
+  }
+}
+
 let lock: any = null;
 let wantLock = false;
 

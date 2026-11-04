@@ -74,6 +74,18 @@ export function isDeloadWeek(program: Program, today = dayKey()) {
 /** Prépare les séries d'un exercice à partir de l'historique */
 export function prepareExercise(planned: PlannedExercise, deload: boolean, excludeId?: string): SessionExercise {
   const def = CATALOG[planned.key];
+  if (planned.circuit) {
+    const c = planned.circuit;
+    return {
+      key: planned.key,
+      planned,
+      sets: Array.from({ length: c.rounds }, () => ({ w: 0, r: c.keys.length, done: false })),
+      tip: {
+        kind: 'same',
+        text: `${c.rounds} tours de ${c.keys.length} exercices : ${c.work} s à fond, ${c.rest} s de repos. Le minuteur s’occupe de tout. Trop facile ? Prends la variante plus dure.`,
+      },
+    };
+  }
   const step = def && def.increment >= 2.5 ? 2.5 : 1;
   const hist = historyFor(planned.key, excludeId);
   const sets = deload ? Math.max(2, planned.sets - 1) : planned.sets;
@@ -114,6 +126,9 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
     w = roundTo(top * 0.9, step);
     reps = Array.from({ length: sets }, () => planned.min);
     tip = { kind: 'down', text: `Deux séances difficiles de suite : on repart à ${fmtWeight(w)} kg (−10 %) pour remonter proprement.` };
+  } else if (allTop && (def?.increment ?? 1) === 0) {
+    reps = Array.from({ length: sets }, () => planned.max);
+    tip = { kind: 'up', text: `${planned.max} reps partout : vise encore plus de reps, ou ajoute un lest.` };
   } else if (allTop) {
     const inc = def?.increment ?? (def?.lower ? 5 : 2.5);
     w = top + inc;
@@ -135,4 +150,35 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
   }
 
   return { key: planned.key, planned, sets: reps.map((r) => ({ w, r, done: false })), tip };
+}
+
+/**
+ * Ajustement en direct : selon les reps faites sur une série, la charge des séries suivantes
+ * monte (fourchette dépassée) ou baisse (fourchette pas atteinte).
+ */
+export function autoAdjust(ex: SessionExercise, w: number, r: number): { w: number; r: number; text: string } | null {
+  const def = CATALOG[ex.key];
+  if (!def || def.timed || ex.planned.circuit || w <= 0) return null;
+  const { min, max } = ex.planned;
+  const inc = def.increment > 0 ? def.increment : 0;
+  if (inc === 0) return null;
+  const step = inc >= 2.5 ? 2.5 : 1;
+  const round = (x: number) => Math.max(step, Math.round(x / step) * step);
+  if (r >= max + 3) {
+    const nw = round(w + 2 * inc);
+    return { w: nw, r: min, text: `${r} reps, c’est bien trop facile : ${fmtWeight(nw)} kg sur la série suivante.` };
+  }
+  if (r > max) {
+    const nw = round(w + inc);
+    return { w: nw, r: min, text: `${r} reps, au-dessus de ${max} : on monte à ${fmtWeight(nw)} kg.` };
+  }
+  if (r <= min - 3) {
+    const nw = round(Math.min(w - inc, w * 0.85));
+    return { w: nw, r: min, text: `${r} reps seulement : on descend à ${fmtWeight(nw)} kg pour rester entre ${min} et ${max}.` };
+  }
+  if (r < min) {
+    const nw = round(Math.min(w - step, w * 0.93));
+    return { w: nw, r: min, text: `${r} reps, sous les ${min} : ${fmtWeight(nw)} kg pour la suite.` };
+  }
+  return null;
 }

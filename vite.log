@@ -1,0 +1,7 @@
+
+  VITE v8.3.5  ready in 367 ms
+
+  ➜  Local:   http://localhost:5173/elan/
+  ➜  Network: use --host to expose
+1:36:09 PM [vite] (client) hmr update /src/screens/Workout.tsx
+1:37:00 PM [vite] (client) hmr update /src/screens/Workout.tsx

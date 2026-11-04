@@ -145,3 +145,31 @@ setInterval(() => {
   }
   if (left < -20_000) stopRest();
 }, 250);
+
+// ---------- Ordre des séries (supersets enchaînés) ----------
+export type SetRef = { ei: number; sj: number };
+
+/** Membres du même superset que l'exercice ei (lui compris) */
+export function groupMembers(s: Session, ei: number) {
+  const g = s.exercises[ei]?.planned.group;
+  if (!g) return [ei];
+  return s.exercises.map((x, k) => (x.planned.group === g ? k : -1)).filter((k) => k >= 0);
+}
+
+/** Ordre de la séance : dans un superset, série 1 de A, série 1 de B, puis série 2… */
+export function setOrder(s: Session): SetRef[] {
+  const out: SetRef[] = [];
+  const seen = new Set<number>();
+  s.exercises.forEach((_, i) => {
+    if (seen.has(i)) return;
+    const members = groupMembers(s, i);
+    members.forEach((k) => seen.add(k));
+    const rounds = Math.max(...members.map((k) => s.exercises[k].sets.length));
+    for (let j = 0; j < rounds; j++) for (const k of members) if (j < s.exercises[k].sets.length) out.push({ ei: k, sj: j });
+  });
+  return out;
+}
+
+export function nextPending(s: Session): SetRef | undefined {
+  return setOrder(s).find((p) => !s.exercises[p.ei].sets[p.sj].done);
+}

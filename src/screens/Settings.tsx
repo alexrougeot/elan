@@ -4,7 +4,7 @@ import { closeStore, getData, putDoc, useStoreVersion } from '../lib/store';
 import { lastSyncAt, syncNow, useSyncStatus } from '../lib/sync';
 import { dayKey, hhmm, WEEKDAYS } from '../lib/dates';
 import { computeTargets, GOALS, kcalOf, mealTarget, type Goal, type Meal, type Profile, type Targets } from '../lib/nutrition';
-import { CATALOG, defaultRest, exName, fullBodyProgram, upperLowerProgram, type Program, type ProgramDay } from '../lib/program';
+import { ABS, abs, CATALOG, defaultRest, exName, fullBodyProgram, upperLowerProgram, type Program, type ProgramDay } from '../lib/program';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../lib/push';
 import { isIOS, isStandalone } from '../lib/device';
 import { createLink, getLink, linkUrl, runShortcut, SHORTCUT_NAME } from '../lib/health';
@@ -516,7 +516,7 @@ function DayEditor({ program, day, onBack, onSave }: { program: Program; day: Pr
   }
 
   const muscles = [...new Set(Object.values(CATALOG).map((c) => c.muscle))];
-  const found = Object.values(CATALOG).filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()));
+  const found = Object.values(CATALOG).filter((c) => !c.circuit && (!q || c.name.toLowerCase().includes(q.toLowerCase())));
 
   return (
     <>
@@ -566,6 +566,12 @@ function DayEditor({ program, day, onBack, onSave }: { program: Program; day: Pr
               </button>
             </div>
           </div>
+          {e.group && <span className="muscle tint-violet" style={{ alignSelf: 'flex-start' }}>Superset {e.group}</span>}
+          {e.circuit ? (
+            <span className="small muted">
+              {e.circuit.rounds} tours · {e.circuit.work} s / {e.circuit.rest} s : {e.circuit.keys.map((k) => exName(k)).join(', ')}
+            </span>
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
             {(
               [
@@ -592,6 +598,7 @@ function DayEditor({ program, day, onBack, onSave }: { program: Program; day: Pr
               </label>
             ))}
           </div>
+          )}
         </div>
       ))}
 
@@ -599,6 +606,12 @@ function DayEditor({ program, day, onBack, onSave }: { program: Program; day: Pr
         <Icon name="plus" size={18} />
         Ajouter un exercice
       </button>
+      {!day.exercises.some((e) => e.circuit) && (
+        <button className="btn ghost press" onClick={() => update((d) => ({ ...d, exercises: [...d.exercises, abs(ABS.a)] }))}>
+          <Icon name="timer" size={18} />
+          Ajouter 10 min d’abdos à la fin
+        </button>
+      )}
       <button
         className="btn danger press"
         onClick={() => {

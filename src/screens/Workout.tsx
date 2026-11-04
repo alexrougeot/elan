@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tab } from '../App';
 import { getData, getDoc, putDoc, removeDoc, useStoreVersion } from '../lib/store';
 import { dayKey, fmtNum, fmtWeight, shortDate, WEEKDAYS } from '../lib/dates';
-import { CATALOG, estimateMinutes, exName, platesFor, type Program, type ProgramDay } from '../lib/program';
-import { bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
-import { activeSession, adjustRest, getProgram, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest } from '../lib/workout';
-import { haptic, keepScreenOn, unlockAudio } from '../lib/device';
+import { CATALOG, estimateMinutes, exName, platesFor, type Circuit, type Program, type ProgramDay } from '../lib/program';
+import { autoAdjust, bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
+import { activeSession, adjustRest, getProgram, groupMembers, nextPending, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest } from '../lib/workout';
+import { haptic, keepScreenOn, tone, unlockAudio } from '../lib/device';
 import { getLink, healthForSession, healthLine } from '../lib/health';
 import { HeroLeaves, Icon, Ring, Sheet, Stepper, muscleTint, showToast, useNow } from '../components/ui';
 
@@ -76,8 +76,9 @@ function Planner({ go }: { go: (t: Tab) => void }) {
                       {exName(e.key)}
                     </span>
                     <span className="on-hero-2">
-                      {e.sets} × {e.min === e.max ? e.min : `${e.min}-${e.max}`}
-                      {CATALOG[e.key]?.timed ? ' s' : ''}
+                      {e.circuit
+                        ? `${Math.round((e.circuit.rounds * e.circuit.keys.length * (e.circuit.work + e.circuit.rest)) / 60)} min`
+                        : `${e.group ? 'SS ' + e.group + ' · ' : ''}${e.sets} × ${e.min === e.max ? e.min : `${e.min}-${e.max}`}${CATALOG[e.key]?.timed ? ' s' : ''}`}
                     </span>
                   </div>
                 ))}
@@ -169,6 +170,7 @@ function SessionView({ id }: { id: string }) {
   const [replace, setReplace] = useState<number | null>(null);
   const [plates, setPlates] = useState<number | null>(null);
   const [finish, setFinish] = useState(false);
+  const [circuitFor, setCircuitFor] = useState<number | null>(null);
 
   useEffect(() => {
     void keepScreenOn(true);
@@ -178,10 +180,32 @@ function SessionView({ id }: { id: string }) {
   }, []);
 
   if (!s) return null;
-  const current =s.exercises.findIndex((e) => e.sets.some((x) => !x.done));
+  const next = nextPending(s);
+  const currentGroup = next ? groupMembers(s, next.ei) : [];
   const elapsed = Math.max(0, Math.floor((now - new Date(s.startedAt).getTime()) / 1000));
   const totalSets = s.exercises.reduce((a, e) => a + e.sets.length, 0);
   const doneSets = s.exercises.reduce((a, e) => a + e.sets.filter((x) => x.done).length, 0);
+
+  async function goOn(ei: number, sj: number, adjustText?: string, undo?: () => void) {
+    const after = getDoc<Session>(id)!.data;
+    const n = nextPending(after);
+    if (!n) {
+      stopRest();
+      setFinish(true);
+      return;
+    }
+    const sameGroup = n.ei !== ei && groupMembers(after, ei).includes(n.ei);
+    if (n.ei !== ei) setTimeout(() => document.getElementById('ex-' + n.ei)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    if (sameGroup && n.sj === sj) {
+      // superset : on enchaîne sans repos
+      stopRest();
+      showToast(adjustText ?? `Enchaîne : ${exName(after.exercises[n.ei].key)}`, undo ? { label: 'Annuler', run: undo } : undefined, adjustText ? 5000 : 2500);
+      return;
+    }
+    if (adjustText) showToast(adjustText, undo ? { label: 'Annuler', run: undo } : undefined, 5000);
+    const label = n.ei === ei ? `Série ${n.sj + 1} · ${exName(after.exercises[ei].key)}` : sameGroup ? `Série ${n.sj + 1} · superset` : `Prochain : ${exName(after.exercises[n.ei].key)}`;
+    if (after.exercises[ei].planned.rest > 0) startRest(after.exercises[ei].planned.rest, label);
+  }
 
   async function validate(ei: number, sj: number) {
     unlockAudio();
@@ -199,23 +223,42 @@ function SessionView({ id }: { id: string }) {
     const prev = bestE1rm(ex.key, id);
     const inSession = Math.max(0, ...ex.sets.filter((x) => x.done).map((x) => e1rm(x.w, x.r)));
     const v = e1rm(set.w, set.r);
-    if (prev > 0 && v > Math.max(prev, inSession) && !CATALOG[ex.key]?.timed) {
-      showToast(`Nouveau record sur ${exName(ex.key)} : ${fmtWeight(set.w)} kg × ${set.r}`, undefined, 4500);
-    }
+    const record = prev > 0 && v > Math.max(prev, inSession) && !CATALOG[ex.key]?.timed;
+    // Ajustement en direct des séries suivantes
+    const adj = autoAdjust(ex, set.w, set.r);
+    const before = ex.sets.map((x) => ({ w: x.w, r: x.r }));
     await updateSession(id, (x) => {
-      x.exercises[ei].sets[sj].done = true;
-      x.exercises[ei].sets[sj].at = new Date().toISOString();
+      const sets = x.exercises[ei].sets;
+      sets[sj].done = true;
+      sets[sj].at = new Date().toISOString();
+      if (adj) for (let k = sj + 1; k < sets.length; k++) if (!sets[k].done) sets[k] = { ...sets[k], w: adj.w, r: adj.r };
       return x;
     });
+    const undo = adj
+      ? () =>
+          void updateSession(id, (x) => {
+            const sets = x.exercises[ei].sets;
+            for (let k = sj + 1; k < sets.length; k++) if (!sets[k].done && before[k]) sets[k] = { ...sets[k], w: before[k].w, r: before[k].r };
+            return x;
+          })
+      : undefined;
+    if (record) showToast(`Nouveau record sur ${exName(ex.key)} : ${fmtWeight(set.w)} kg × ${set.r}`, undefined, 4500);
+    await goOn(ei, sj, adj && !record ? adj.text : undefined, undo);
+  }
+
+  async function circuitDone(ei: number) {
+    tone('end');
+    await updateSession(id, (x) => {
+      for (const st of x.exercises[ei].sets) {
+        st.done = true;
+        st.at = new Date().toISOString();
+      }
+      return x;
+    });
+    setCircuitFor(null);
+    showToast('Abdos terminés, bravo !');
     const after = getDoc<Session>(id)!.data;
-    const nextEi = after.exercises.findIndex((e) => e.sets.some((y) => !y.done));
-    if (nextEi < 0) {
-      stopRest();
-      setFinish(true);
-      return;
-    }
-    const label = nextEi === ei ? `Série ${sj + 2} · ${exName(ex.key)}` : `Prochain : ${exName(after.exercises[nextEi].key)}`;
-    startRest(ex.planned.rest, label);
+    if (!nextPending(after)) setFinish(true);
   }
 
   async function addSet(ei: number) {
@@ -268,14 +311,20 @@ function SessionView({ id }: { id: string }) {
         </div>
       )}
 
-      {s.exercises.map((ex, ei) => (
+      {s.exercises.map((ex, ei) =>
+        ex.planned.circuit ? (
+          <CircuitCard key={ei + ex.key} id={'ex-' + ei} ex={ex} isCurrent={currentGroup.includes(ei)} onStart={() => setCircuitFor(ei)} />
+        ) : (
         <ExerciseCard
           key={ei + ex.key}
+          id={'ex-' + ei}
           sid={id}
           ex={ex}
-          isCurrent={ei === current}
-          open={expanded[ei] ?? ei === current}
-          onToggle={() => setExpanded((m) => ({ ...m, [ei]: !(m[ei] ?? ei === current) }))}
+          isCurrent={currentGroup.includes(ei)}
+          activeSj={next && next.ei === ei ? next.sj : -1}
+          partner={ex.planned.group ? groupMembers(s, ei).filter((k) => k !== ei).map((k) => exName(s.exercises[k].key)).join(', ') : undefined}
+          open={expanded[ei] ?? currentGroup.includes(ei)}
+          onToggle={() => setExpanded((m) => ({ ...m, [ei]: !(m[ei] ?? currentGroup.includes(ei)) }))}
           onEdit={(sj) => setEdit({ ei, sj })}
           onValidate={(sj) => validate(ei, sj)}
           onAddSet={() => addSet(ei)}
@@ -283,7 +332,8 @@ function SessionView({ id }: { id: string }) {
           onReplace={() => setReplace(ei)}
           onPlates={() => setPlates(ei)}
         />
-      ))}
+        )
+      )}
 
       {rest && <RestBar />}
 
@@ -291,14 +341,22 @@ function SessionView({ id }: { id: string }) {
       <ReplaceSheet sid={id} session={s} index={replace} onClose={() => setReplace(null)} />
       <PlatesSheet session={s} index={plates} onClose={() => setPlates(null)} />
       <FinishSheet sid={id} session={s} open={finish} onClose={() => setFinish(false)} />
+      <CircuitSheet
+        circuit={circuitFor !== null ? s.exercises[circuitFor]?.planned.circuit : undefined}
+        onClose={() => setCircuitFor(null)}
+        onDone={() => circuitFor !== null && circuitDone(circuitFor)}
+      />
     </main>
   );
 }
 
 function ExerciseCard({
+  id,
   sid,
   ex,
   isCurrent,
+  activeSj,
+  partner,
   open,
   onToggle,
   onEdit,
@@ -308,9 +366,12 @@ function ExerciseCard({
   onReplace,
   onPlates,
 }: {
+  id: string;
   sid: string;
   ex: SessionExercise;
   isCurrent: boolean;
+  activeSj: number;
+  partner?: string;
   open: boolean;
   onToggle: () => void;
   onEdit: (sj: number) => void;
@@ -324,25 +385,24 @@ function ExerciseCard({
   const timed = !!def?.timed;
   const last = useMemo(() => historyFor(ex.key, sid)[0], [ex.key, sid]);
   const allDone = ex.sets.every((x) => x.done);
-  const firstOpen = ex.sets.findIndex((x) => !x.done);
   const range = ex.planned.min === ex.planned.max ? `${ex.planned.min}` : `${ex.planned.min}-${ex.planned.max}`;
   const restTxt = ex.planned.rest >= 60 ? `${Math.floor(ex.planned.rest / 60)} min${ex.planned.rest % 60 ? ' ' + (ex.planned.rest % 60) : ''}` : `${ex.planned.rest} s`;
   const tipColor = ex.tip.kind === 'up' ? 'var(--brand-deep)' : ex.tip.kind === 'down' || ex.tip.kind === 'deload' ? 'var(--amber-ink)' : 'var(--ink)';
   const tipBg = ex.tip.kind === 'up' ? 'var(--brand-tint)' : ex.tip.kind === 'down' || ex.tip.kind === 'deload' ? 'var(--amber-tint)' : 'var(--line2)';
 
   return (
-    <section className="card col" style={{ gap: 12, boxShadow: isCurrent ? 'var(--shadow), inset 0 0 0 1.5px color-mix(in srgb, var(--brand) 40%, transparent)' : undefined }}>
+    <section id={id} className="card col" style={{ gap: 12, scrollMarginTop: 16, boxShadow: isCurrent ? 'var(--shadow), inset 0 0 0 1.5px color-mix(in srgb, var(--brand) 40%, transparent)' : undefined }}>
       <button className="row" style={{ border: 'none', background: 'none', padding: 0, textAlign: 'left', minHeight: 44 }} onClick={onToggle} aria-expanded={open}>
         <div className="grow col" style={{ gap: 4 }}>
-          {def && (
-            <span className={'muscle ' + muscleTint(def.muscle)} style={{ alignSelf: 'flex-start' }}>
-              {def.muscle}
-            </span>
-          )}
+          <span className="row" style={{ gap: 6 }}>
+            {def && <span className={'muscle ' + muscleTint(def.muscle)}>{def.muscle}</span>}
+            {ex.planned.group && <span className="muscle tint-violet">Superset {ex.planned.group}</span>}
+          </span>
           <span style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.015em' }}>{exName(ex.key)}</span>
           <span className="small muted">
             {ex.sets.length} × {range}
             {timed ? ' s' : ' reps'} · repos {restTxt}
+            {ex.planned.group ? ' après le superset' : ''}
             {def?.equipment === 'haltères' ? ' · charge par haltère' : ''}
           </span>
         </div>
@@ -373,6 +433,12 @@ function ExerciseCard({
               <b>Coach :</b> {ex.tip.text}
             </span>
           </div>
+          {partner && (
+            <div className="small" style={{ color: 'var(--violet-ink)', fontWeight: 600 }}>
+              Enchaîne chaque série avec {partner}, sans pause.
+            </div>
+          )}
+          {ex.planned.note && <div className="small muted">{ex.planned.note}</div>}
 
           <div className="col" style={{ gap: 6 }}>
             <div className="set-row tiny muted" style={{ minHeight: 18, fontWeight: 600 }}>
@@ -382,7 +448,7 @@ function ExerciseCard({
               <span />
             </div>
             {ex.sets.map((x, sj) => {
-              const active = isCurrent && sj === firstOpen;
+              const active = sj === activeSj;
               return (
                 <div key={sj} className={'set-row' + (active ? ' active' : '')}>
                   <span style={{ fontWeight: 700, color: x.done ? 'var(--ink2)' : 'var(--ink)' }}>{sj + 1}</span>
@@ -729,6 +795,225 @@ function FinishSheet({ sid, session, open, onClose }: { sid: string; session: Se
         <button className="btn danger press" onClick={drop}>
           Oui, supprimer cette séance
         </button>
+      )}
+    </Sheet>
+  );
+}
+
+// ---------------- Abdos en circuit ----------------
+function circuitLabels(keys: string[]) {
+  return keys.map((k, i) => {
+    const same = keys.filter((x) => x === k).length;
+    if (same < 2) return exName(k);
+    const nth = keys.slice(0, i + 1).filter((x) => x === k).length;
+    return `${exName(k)} (côté ${nth})`;
+  });
+}
+
+function CircuitCard({ id, ex, isCurrent, onStart }: { id: string; ex: SessionExercise; isCurrent: boolean; onStart: () => void }) {
+  const c = ex.planned.circuit!;
+  const done = ex.sets.every((x) => x.done);
+  const labels = circuitLabels(c.keys);
+  const minutes = Math.round((c.rounds * c.keys.length * (c.work + c.rest)) / 60);
+  return (
+    <section id={id} className={isCurrent ? 'hero col' : 'card col'} style={{ gap: 12, scrollMarginTop: 16 }}>
+      {isCurrent && <HeroLeaves />}
+      <div className="row between">
+        <div className="col" style={{ gap: 4 }}>
+          <span className={'muscle ' + (isCurrent ? '' : 'tint-violet')} style={isCurrent ? { background: 'rgba(255,255,255,0.16)', color: '#fff' } : undefined}>
+            Abdos
+          </span>
+          <span style={{ fontSize: 19, fontWeight: 700 }}>Circuit abdos · {minutes} min</span>
+          <span className={'small ' + (isCurrent ? 'on-hero-2' : 'muted')}>
+            {c.rounds} tours · {c.work} s d’effort, {c.rest} s de repos
+          </span>
+        </div>
+        {done && (
+          <span className="badge">
+            <Icon name="check" size={14} stroke={2.6} />
+            Fait
+          </span>
+        )}
+      </div>
+      <div className="col" style={{ gap: 6 }}>
+        {labels.map((l, i) => (
+          <div key={i} className="row small" style={{ gap: 10 }}>
+            <span
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 11,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 12,
+                fontWeight: 700,
+                background: isCurrent ? 'rgba(255,255,255,0.16)' : 'var(--violet-tint)',
+                color: isCurrent ? '#fff' : 'var(--violet-ink)',
+              }}
+            >
+              {i + 1}
+            </span>
+            <span style={{ fontWeight: 600 }}>{l}</span>
+          </div>
+        ))}
+      </div>
+      <button className={isCurrent ? 'hero-btn press' : 'btn ghost press'} onClick={onStart}>
+        <Icon name="timer" size={20} />
+        {done ? 'Refaire le circuit' : 'Lancer le minuteur'}
+      </button>
+    </section>
+  );
+}
+
+type Phase = { type: 'work' | 'rest'; key: string; label: string; i: number; r: number; dur: number };
+
+function CircuitSheet({ circuit, onClose, onDone }: { circuit?: Circuit; onClose: () => void; onDone: () => void }) {
+  const [startAt, setStartAt] = useState<number | null>(null);
+  const [pausedAt, setPausedAt] = useState<number | null>(null);
+  const [skip, setSkip] = useState(0);
+  const now = useNow(200);
+  const last = useRef({ idx: -1, tick: -1, ended: false });
+
+  const phases = useMemo<Phase[]>(() => {
+    if (!circuit) return [];
+    const labels = circuitLabels(circuit.keys);
+    const out: Phase[] = [];
+    for (let r = 0; r < circuit.rounds; r++)
+      circuit.keys.forEach((k, i) => {
+        out.push({ type: 'work', key: k, label: labels[i], i, r, dur: circuit.work });
+        const isLast = r === circuit.rounds - 1 && i === circuit.keys.length - 1;
+        if (!isLast && circuit.rest > 0) {
+          const ni = (i + 1) % circuit.keys.length;
+          out.push({ type: 'rest', key: circuit.keys[ni], label: labels[ni], i: ni, r: ni === 0 ? r + 1 : r, dur: circuit.rest });
+        }
+      });
+    return out;
+  }, [circuit]);
+
+  useEffect(() => {
+    if (!circuit) {
+      setStartAt(null);
+      setPausedAt(null);
+      setSkip(0);
+      last.current = { idx: -1, tick: -1, ended: false };
+    }
+  }, [circuit]);
+
+  const total = phases.reduce((a, p) => a + p.dur, 0);
+  const elapsed = startAt ? ((pausedAt ?? now) - startAt) / 1000 + skip : 0;
+  let acc = 0;
+  let idx = phases.length;
+  for (let k = 0; k < phases.length; k++) {
+    if (elapsed < acc + phases[k].dur) {
+      idx = k;
+      break;
+    }
+    acc += phases[k].dur;
+  }
+  const phase = phases[idx];
+  const left = phase ? Math.ceil(acc + phase.dur - elapsed) : 0;
+  const finished = startAt !== null && idx >= phases.length;
+
+  useEffect(() => {
+    if (!startAt || pausedAt) return;
+    if (finished) {
+      if (!last.current.ended) {
+        last.current.ended = true;
+        onDone();
+      }
+      return;
+    }
+    if (idx !== last.current.idx) {
+      last.current.idx = idx;
+      tone(phase.type === 'work' ? 'go' : 'rest');
+    } else if (left <= 3 && left >= 1 && left !== last.current.tick) {
+      last.current.tick = left;
+      tone('tick');
+    }
+  }, [idx, left, startAt, pausedAt, finished]);
+
+  function start() {
+    unlockAudio();
+    haptic();
+    stopRest();
+    setStartAt(Date.now());
+    setPausedAt(null);
+    setSkip(0);
+    last.current = { idx: -1, tick: -1, ended: false };
+  }
+
+  function togglePause() {
+    haptic();
+    if (pausedAt) {
+      setStartAt((s0) => (s0 ?? Date.now()) + (Date.now() - pausedAt));
+      setPausedAt(null);
+    } else setPausedAt(Date.now());
+  }
+
+  function next() {
+    haptic();
+    if (!phase) return;
+    setSkip((x) => x + (acc + phase.dur - elapsed) + 0.01);
+  }
+
+  const work = phase?.type === 'work';
+  const after = phases.slice(idx + 1).find((p) => p.type === 'work');
+
+  return (
+    <Sheet open={!!circuit} onClose={onClose} title="Circuit abdos" full>
+      {circuit && (
+        <div className="col" style={{ gap: 16 }}>
+          {!startAt ? (
+            <>
+              <p className="small muted" style={{ margin: 0 }}>
+                {circuit.rounds} tours de {circuit.keys.length} exercices, {circuit.work} s d’effort et {circuit.rest} s de repos. Un bip annonce chaque changement, avec un compte à rebours 3, 2, 1. Monte le son.
+              </p>
+              <button className="btn brand press" onClick={start}>
+                <Icon name="timer" />
+                C’est parti ({Math.round(total / 60)} min)
+              </button>
+            </>
+          ) : finished ? (
+            <div className="hero col" style={{ gap: 10, alignItems: 'center', textAlign: 'center' }}>
+              <HeroLeaves />
+              <Icon name="trophy" size={40} />
+              <span style={{ fontSize: 24, fontWeight: 700 }}>Circuit terminé</span>
+            </div>
+          ) : (
+            <>
+              <div className={work ? 'hero col' : 'card col'} style={{ gap: 10, alignItems: 'center', textAlign: 'center', padding: 24, background: work ? undefined : 'var(--card2)', boxShadow: work ? undefined : 'none' }}>
+                {work && <HeroLeaves />}
+                <span className={work ? 'hero-chip' : 'badge gray'}>
+                  {work ? 'Effort' : 'Repos'} · tour {phase.r + 1}/{circuit.rounds} · {phase.i + 1}/{circuit.keys.length}
+                </span>
+                <span style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em' }}>{work ? phase.label : `Ensuite : ${phase.label}`}</span>
+                <Ring
+                  value={Math.max(0, (acc + phase.dur - elapsed) / phase.dur)}
+                  size={180}
+                  stroke={12}
+                  color={work ? '#BEF264' : 'var(--brand)'}
+                  track={work ? 'rgba(255,255,255,0.18)' : 'var(--track)'}
+                >
+                  <span style={{ fontSize: 64, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1 }}>{left}</span>
+                  <span className={'small ' + (work ? 'on-hero-2' : 'muted')}>secondes</span>
+                </Ring>
+                {work && after && <span className="small on-hero-2">Puis : {after.label}</span>}
+              </div>
+              <div className="row" style={{ gap: 10 }}>
+                <button className="btn ghost press grow" onClick={togglePause}>
+                  {pausedAt ? 'Reprendre' : 'Pause'}
+                </button>
+                <button className="btn ghost press grow" onClick={next}>
+                  Passer
+                </button>
+              </div>
+              <div className="progress-line">
+                <div style={{ width: Math.min(100, (elapsed / total) * 100) + '%' }} />
+              </div>
+            </>
+          )}
+        </div>
       )}
     </Sheet>
   );
