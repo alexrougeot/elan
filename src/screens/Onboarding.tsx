@@ -2,19 +2,14 @@ import { useMemo, useState } from 'react';
 import { putDoc } from '../lib/store';
 import { dayKey, fmtNum, hhmm } from '../lib/dates';
 import { computeTargets, defaultMeals, GOALS, kcalOf, type Goal, type Profile, type Sex, type Targets } from '../lib/nutrition';
-import { emptyProgram, fullBodyProgram, upperLowerProgram } from '../lib/program';
+import { DEFAULT_DAYS, emptyProgram, programFor } from '../lib/program';
+import ProgramChooser from '../components/ProgramChooser';
 import { Icon, LogoMark } from '../components/ui';
 
 const ACTIVITY = [
   { v: 1.375, label: 'Peu actif', hint: '1 ou 2 séances par semaine' },
   { v: 1.55, label: 'Actif', hint: '3 à 5 séances par semaine' },
   { v: 1.725, label: 'Très actif', hint: '6 séances ou un métier physique' },
-];
-
-const PROGRAMS = [
-  { id: 'ul', label: 'Haut / bas · 4 séances', hint: 'Lundi, mercredi, jeudi, vendredi matin. Chaque muscle 2 fois par semaine.' },
-  { id: 'fb', label: 'Full body · 3 séances', hint: 'Lundi, mercredi, vendredi. Tout le corps à chaque séance.' },
-  { id: 'none', label: 'Je compose le mien', hint: 'Tu ajoutes tes jours et tes exercices dans les réglages.' },
 ];
 
 export default function Onboarding() {
@@ -27,7 +22,9 @@ export default function Onboarding() {
   const [goal, setGoal] = useState<Goal>('masse');
   const [goalWeight, setGoalWeight] = useState('');
   const [activity, setActivity] = useState(1.55);
-  const [program, setProgram] = useState('ul');
+  const [custom, setCustom] = useState(false);
+  const [count, setCount] = useState(4);
+  const [days, setDays] = useState<number[]>(DEFAULT_DAYS[4]);
   const [saving, setSaving] = useState(false);
 
   const num = (s: string) => Number(s.replace(',', '.'));
@@ -48,7 +45,7 @@ export default function Onboarding() {
     profile.name.length > 0,
     profile.age > 10 && profile.age < 100 && profile.height > 120 && profile.height < 230 && profile.weight > 30 && profile.weight < 250,
     goal === 'maintien' || (profile.goalWeight > 30 && profile.goalWeight < 250),
-    true,
+    custom || days.length === count,
     true,
   ][step];
 
@@ -56,9 +53,9 @@ export default function Onboarding() {
     if (!targets) return;
     setSaving(true);
     const today = dayKey();
-    const t: Targets = { ...targets, meals: defaultMeals(), mode: 'auto', history: [] };
+    const t: Targets = { ...targets, meals: defaultMeals(goal), mode: 'auto', history: [] };
     await putDoc('targets', 'targets', t);
-    const prog = program === 'ul' ? upperLowerProgram(today) : program === 'fb' ? fullBodyProgram(today) : emptyProgram(today);
+    const prog = custom ? emptyProgram(today) : programFor(count, days, today);
     await putDoc('program', 'program', prog);
     await putDoc('weight:' + today, 'weight', { date: today, kg: profile.weight });
     await putDoc('settings', 'settings', { bar: 20, sound: true });
@@ -165,17 +162,30 @@ export default function Onboarding() {
       {step === 3 && (
         <section className="col" style={{ gap: 18 }}>
           <h1 className="title">Ton programme</h1>
-          <div className="col" style={{ gap: 8 }}>
-            {PROGRAMS.map((p) => (
-              <button key={p.id} className="card press list-row" style={{ boxShadow: program === p.id ? 'inset 0 0 0 2px var(--brand)' : undefined }} onClick={() => setProgram(p.id)} aria-pressed={program === p.id}>
-                <div className="grow">
-                  <div style={{ fontWeight: 600 }}>{p.label}</div>
-                  <div className="small muted">{p.hint}</div>
-                </div>
-                {program === p.id && <Icon name="check" style={{ color: 'var(--brand-ink)' }} />}
+          {!custom ? (
+            <>
+              <ProgramChooser
+                count={count}
+                days={days}
+                onChange={(c, d) => {
+                  setCount(c);
+                  setDays(d);
+                }}
+              />
+              <button className="btn ghost small press" onClick={() => setCustom(true)}>
+                Je préfère composer le mien
               </button>
-            ))}
-          </div>
+            </>
+          ) : (
+            <>
+              <div className="card small" style={{ background: 'var(--card2)', boxShadow: 'none' }}>
+                Tu ajouteras tes jours et tes exercices dans Séance › Programme.
+              </div>
+              <button className="btn ghost small press" onClick={() => setCustom(false)}>
+                Finalement, un programme tout prêt
+              </button>
+            </>
+          )}
           <p className="small muted" style={{ margin: 0 }}>
             Tu pourras changer les jours, les exercices et les séries à tout moment.
           </p>
@@ -193,7 +203,7 @@ export default function Onboarding() {
             </span>
           </div>
           <div className="card tight">
-            {defaultMeals().map((m, i) => {
+            {defaultMeals(goal).map((m, i) => {
               const p = Math.round(targets.p * m.share.p);
               const g = Math.round(targets.g * m.share.g);
               const l = Math.round(targets.l * m.share.l);

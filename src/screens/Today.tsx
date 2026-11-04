@@ -331,6 +331,11 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
                 <span className="tiny muted">{fromWatch ? 'montre' : 'estimé'}</span>
               </span>
             </div>
+            {ai === 0 && extraBurn.bonus === 0 && profile.goal === 'seche' && (
+              <span className="small" style={{ color: 'var(--brand-deep)', background: 'var(--brand-tint)', padding: '10px 12px', borderRadius: 14, lineHeight: 1.45 }}>
+                En sèche, pas besoin de remanger ces calories : elles accélèrent ta perte. Garde bien tes protéines.
+              </span>
+            )}
             {bonus > 0 && dayTargets && (
               <span className="small" style={{ color: 'var(--orange-ink)', background: 'var(--orange-tint)', padding: '10px 12px', borderRadius: 14, lineHeight: 1.45 }}>
                 Ton objectif du jour passe à {fmtNum(dayTargets.kcal)} kcal (+{bonus} en glucides), pour ne pas freiner ta prise de masse. Par exemple : {bonusFood(bonus)}.

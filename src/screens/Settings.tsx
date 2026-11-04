@@ -4,7 +4,8 @@ import { closeStore, getData, putDoc, useStoreVersion } from '../lib/store';
 import { lastSyncAt, syncNow, useSyncStatus } from '../lib/sync';
 import { dayKey, hhmm, WEEKDAYS } from '../lib/dates';
 import { computeTargets, GOALS, kcalOf, mealTarget, type Goal, type Meal, type Profile, type Targets } from '../lib/nutrition';
-import { ABS, abs, CATALOG, defaultRest, exName, fullBodyProgram, upperLowerProgram, type Program, type ProgramDay } from '../lib/program';
+import { ABS, abs, CATALOG, defaultRest, exName, fullBodyProgram, programFor, upperLowerProgram, type Program, type ProgramDay } from '../lib/program';
+import ProgramChooser from '../components/ProgramChooser';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../lib/push';
 import { isIOS, isStandalone } from '../lib/device';
 import { createLink, getLink, linkUrl, runShortcut, SHORTCUT_NAME } from '../lib/health';
@@ -415,6 +416,7 @@ function ProgramPage({ startDay }: { startDay?: string }) {
   const program = getData<Program>('program')!;
   const [editing, setEditing] = useState<string | null>(startDay ?? null);
   const [confirmReset, setConfirmReset] = useState<string | null>(null);
+  const [rebuild, setRebuild] = useState<{ count: number; days: number[] } | null>(null);
   const day = program.days.find((d) => d.id === editing);
 
   async function save(next: Program) {
@@ -481,6 +483,36 @@ function ProgramPage({ startDay }: { startDay?: string }) {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="col" style={{ gap: 8 }}>
+        <span className="small muted" style={{ fontWeight: 600 }}>
+          Changer le nombre de séances
+        </span>
+        {!rebuild ? (
+          <button className="btn ghost press" onClick={() => setRebuild({ count: Math.min(5, Math.max(2, program.days.length || 3)), days: program.days.map((d) => d.weekday).slice(0, 5) })}>
+            {program.days.length} séance{program.days.length > 1 ? 's' : ''} par semaine · modifier
+          </button>
+        ) : (
+          <div className="card col" style={{ gap: 12, background: 'var(--card2)', boxShadow: 'none' }}>
+            <ProgramChooser count={rebuild.count} days={rebuild.days} onChange={(count, days) => setRebuild({ count, days })} />
+            <span className="small muted">Ton programme est recréé pour ces jours, avec les exercices du programme type (tes changements d’exercices sont remplacés). Ton historique et tes charges restent : le coach reprend là où tu en es.</span>
+            <button
+              className="btn brand press"
+              disabled={rebuild.days.length !== rebuild.count}
+              onClick={async () => {
+                await save(programFor(rebuild.count, rebuild.days, program.startDate, program.extras));
+                setRebuild(null);
+                showToast('Programme mis à jour');
+              }}
+            >
+              Valider
+            </button>
+            <button className="btn ghost press" onClick={() => setRebuild(null)}>
+              Annuler
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="col" style={{ gap: 8 }}>

@@ -368,6 +368,39 @@ export function upgradedProgram(prog: Program): Program | null {
   return next;
 }
 
+/** Jours conseillés selon le nombre de séances (1 = lundi) */
+export const DEFAULT_DAYS: Record<number, number[]> = { 2: [1, 4], 3: [1, 3, 5], 4: [1, 3, 4, 5], 5: [1, 2, 3, 4, 5] };
+
+/**
+ * Programme selon le nombre de séances par semaine et les jours choisis :
+ * 2 ou 3 séances → full body, 4 → haut / bas, 5 → haut / bas + un full body.
+ */
+export function programFor(count: number, weekdays: number[], startDate: string, keepExtras: Program['extras'] = []): Program {
+  const days = [...weekdays].sort((a, b) => a - b);
+  const fb = fullBodyProgram(startDate);
+  const ul = upperLowerProgram(startDate);
+  let list: ProgramDay[];
+  let name: string;
+  if (count <= 3) {
+    list = fb.days.slice(0, Math.max(2, count));
+    name = `Full body · ${list.length} séances`;
+  } else if (count === 4) {
+    list = ul.days;
+    name = 'Haut / bas · 4 séances';
+  } else {
+    list = [...ul.days, { ...fb.days[0], id: 'fb-bonus', title: 'Full body', subtitle: 'bonus' }];
+    name = 'Haut / bas + full body · 5 séances';
+  }
+  return {
+    name,
+    startDate,
+    deloadEvery: 7,
+    version: PROGRAM_VERSION,
+    days: list.map((d, i) => ({ ...structuredClone(d), weekday: days[i] ?? d.weekday })),
+    extras: keepExtras.filter((x) => !days.includes(x.weekday)),
+  };
+}
+
 export function emptyProgram(startDate: string): Program {
   return { name: 'Mon programme', startDate, deloadEvery: 7, days: [], extras: [] };
 }

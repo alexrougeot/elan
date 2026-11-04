@@ -64,8 +64,22 @@ export function computeTargets(p: Profile): Pick<Targets, 'kcal' | 'p' | 'g' | '
   return { kcal, p: prot, g: glu, l: lip };
 }
 
+/** Repas par défaut : la prise de masse garde les 5 repas décidés ensemble, sinon 4 repas simples */
+export function defaultMeals(goal: Goal = 'masse'): Meal[] {
+  if (goal !== 'masse') {
+    const m = (name: string, time: string, p: number, g: number, l: number, hint: string): Meal => ({ name, time, share: { p, g, l }, hint });
+    return [
+      m('Petit déjeuner', '07:30', 0.25, 0.25, 0.25, 'Des protéines dès le matin : œufs, skyr ou fromage blanc, pain complet, un fruit.'),
+      m('Déjeuner', '12:30', 0.3, 0.35, 0.3, 'Moitié légumes, un quart de féculents, un quart de viande ou de poisson.'),
+      m('Collation', '16:30', 0.15, 0.1, 0.15, 'Skyr ou fromage blanc, avec un fruit ou quelques amandes.'),
+      m('Dîner', '19:30', 0.3, 0.3, 0.3, 'Légumes à volonté, une protéine maigre, un peu de féculents.'),
+    ];
+  }
+  return massMeals();
+}
+
 // Répartition décidée avec l'utilisateur (en grammes sur 140 P / 430 G / 80 L)
-export function defaultMeals(): Meal[] {
+function massMeals(): Meal[] {
   const m = (name: string, time: string, p: number, g: number, l: number, hint: string): Meal => ({
     name,
     time,

@@ -123,6 +123,9 @@ export default function ActivitySheet({ open, onClose, initial, duoDefault }: { 
           <Icon name="flame" size={18} />
           Environ {kcal} kcal dépensées{type === 'course' && km ? ` · ${pace(minutes, km)}` : ''}
         </span>
+        {bonus === 0 && profile?.goal === 'seche' && (
+          <span className="small">En sèche, pas besoin de remanger ces calories : elles accélèrent ta perte.</span>
+        )}
         {bonus > 0 && (
           <span className="small">
             {yesterday
