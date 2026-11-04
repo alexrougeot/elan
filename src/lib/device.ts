@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react';
+
 // Retours physiques : vibration, son, écran allumé.
 
 let hapticLabel: HTMLLabelElement | null = null;
@@ -116,4 +118,19 @@ export async function compressImage(file: File, max = 900, quality = 0.72): Prom
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+// ---------- Réseau : bascule automatique en ligne / hors ligne ----------
+
+function subscribeOnline(l: () => void) {
+  window.addEventListener('online', l);
+  window.addEventListener('offline', l);
+  return () => {
+    window.removeEventListener('online', l);
+    window.removeEventListener('offline', l);
+  };
+}
+
+export function useOnline() {
+  return useSyncExternalStore(subscribeOnline, () => navigator.onLine);
 }

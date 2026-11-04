@@ -4,10 +4,11 @@ import { addDays, dayKey, fmtNum, hhmm, longDate } from '../lib/dates';
 import { entryMacros, foodsOn, getTargets, mealTarget, sum, totalsOn, type FoodEntry, type Macros } from '../lib/nutrition';
 import { loadCiqual, offProduct, offSearch, rememberFood, searchCiqual, searchMine, myFoods, type FoodItem, type MyFood } from '../lib/foods';
 import { currentSubscription, enablePush, pushSupported } from '../lib/push';
-import { haptic, isIOS, isStandalone } from '../lib/device';
+import { haptic, isIOS, isStandalone, useOnline } from '../lib/device';
+import { countText, portionsFor, type Portion, type PortionChoice } from '../lib/portions';
 import { HeroLeaves, Icon, Ring, Sheet, Stepper, mealVisual, showToast } from '../components/ui';
 
-type FavMeal = { name: string; items: (FoodItem & { grams: number })[] };
+type FavMeal = { name: string; items: (FoodItem & { grams: number; portion?: FoodEntry['portion'] })[] };
 
 export default function Nutrition() {
   useStoreVersion();
@@ -47,7 +48,7 @@ export default function Nutrition() {
     haptic();
     const fav: FavMeal = {
       name: `${targets!.meals[meal].name} · ${items.map((i) => i.data.name.split(',')[0]).slice(0, 2).join(', ')}`,
-      items: items.map((i) => ({ name: i.data.name, brand: i.data.brand, per100: i.data.per100, src: i.data.src, ref: i.data.ref ?? 'perso:' + uid(), grams: i.data.grams })),
+      items: items.map((i) => ({ name: i.data.name, brand: i.data.brand, per100: i.data.per100, src: i.data.src, ref: i.data.ref ?? 'perso:' + uid(), grams: i.data.grams, portion: i.data.portion })),
     };
     await putDoc('favmeal:' + uid(), 'favmeal', fav);
     showToast('Repas ajouté à tes favoris');
@@ -173,6 +174,7 @@ export default function Nutrition() {
                     <div className="grow col" style={{ gap: 1 }}>
                       <span style={{ fontWeight: 600, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.data.name}</span>
                       <span className="tiny muted">
+                        {f.data.portion ? countText(f.data.portion.count, f.data.portion) + ' · ' : ''}
                         {f.data.grams} g{f.data.brand ? ' · ' + f.data.brand : ''}
                       </span>
                     </div>
@@ -213,15 +215,19 @@ export default function Nutrition() {
 }
 
 // ---------------- Ajouter un aliment ----------------
+type Qty = { grams: number; portion?: PortionChoice };
+
 function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | null; onClose: () => void }) {
   const targets = getTargets();
+  const isOnline = useOnline();
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<FoodItem | null>(null);
   const [scan, setScan] = useState(false);
   const [creating, setCreating] = useState<{ code?: string } | null>(null);
-  const [online, setOnline] = useState<FoodItem[] | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [online, setOnline] = useState<{ q: string; items: FoodItem[] } | null>(null);
+  const [onlineState, setOnlineState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [ciqualReady, setCiqualReady] = useState(false);
+  const [retry, setRetry] = useState(0);
   useStoreVersion();
 
   useEffect(() => {
@@ -236,30 +242,55 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
       .catch(() => {});
   }, [meal]);
 
-  useEffect(() => setOnline(null), [q]);
+  // Recherche en ligne automatique dès qu'il y a du réseau
+  useEffect(() => {
+    const query = q.trim();
+    if (meal === null || query.length < 3 || !isOnline) {
+      setOnlineState('idle');
+      return;
+    }
+    if (online?.q === query) return;
+    let alive = true;
+    setOnlineState('loading');
+    const t = setTimeout(async () => {
+      try {
+        const items = await offSearch(query);
+        if (!alive) return;
+        setOnline({ q: query, items });
+        setOnlineState('idle');
+      } catch {
+        if (alive) setOnlineState('error');
+      }
+    }, 650);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [q, isOnline, meal, retry]);
 
   const mine = useMemo(() => (q.trim() ? searchMine(q) : myFoods()).slice(0, 25), [q, meal, picked]);
   const ciq = useMemo(() => (q.trim().length >= 2 && ciqualReady ? searchCiqual(q) : []), [q, ciqualReady]);
   const favs = allOf<FavMeal>('favmeal');
+  const onlineItems = online && online.q === q.trim() ? online.items.filter((x) => !mine.some((m) => m.ref === x.ref)) : [];
 
-  async function searchOnline() {
-    setSearching(true);
-    try {
-      setOnline(await offSearch(q));
-    } catch {
-      showToast('Pas de réseau pour chercher en ligne.');
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  async function add(item: FoodItem, grams: number) {
+  async function add(item: FoodItem, qty: Qty) {
     if (meal === null) return;
     haptic();
-    const e: FoodEntry = { date, meal, name: item.name, brand: item.brand, grams, per100: item.per100, src: item.src, ref: item.ref, at: new Date().toISOString() };
+    const e: FoodEntry = {
+      date,
+      meal,
+      name: item.name,
+      brand: item.brand,
+      grams: qty.grams,
+      per100: item.per100,
+      src: item.src,
+      ref: item.ref,
+      portion: qty.portion,
+      at: new Date().toISOString(),
+    };
     await putDoc('food:' + uid(), 'food', e);
-    await rememberFood(item, grams);
-    showToast(`${item.name.split(',')[0]} ajouté`);
+    await rememberFood(item, qty.grams, qty.portion ? { one: qty.portion.one, count: qty.portion.count } : undefined);
+    showToast(`${qty.portion ? countText(qty.portion.count, qty.portion) + ' · ' : ''}${item.name.split(',')[0]} ajouté`);
     onClose();
   }
 
@@ -267,18 +298,30 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
     if (meal === null) return;
     haptic();
     for (const it of f.items) {
-      await putDoc('food:' + uid(), 'food', { date, meal, name: it.name, brand: it.brand, grams: it.grams, per100: it.per100, src: it.src, ref: it.ref, at: new Date().toISOString() } as FoodEntry);
+      await putDoc('food:' + uid(), 'food', {
+        date,
+        meal,
+        name: it.name,
+        brand: it.brand,
+        grams: it.grams,
+        per100: it.per100,
+        src: it.src,
+        ref: it.ref,
+        portion: it.portion,
+        at: new Date().toISOString(),
+      } as FoodEntry);
     }
     showToast('Repas favori ajouté');
     onClose();
   }
 
   const title = meal !== null && targets ? `Ajouter · ${targets.meals[meal].name}` : 'Ajouter';
+  const query = q.trim();
 
   return (
     <Sheet open={meal !== null} onClose={onClose} title={title} full>
       {picked ? (
-        <QuantityPanel item={picked} onBack={() => setPicked(null)} onConfirm={(g) => add(picked, g)} cta="Ajouter" />
+        <QuantityPanel item={picked} onBack={() => setPicked(null)} onConfirm={(qty) => add(picked, qty)} cta="Ajouter" />
       ) : scan ? (
         <Scanner
           onCancel={() => setScan(false)}
@@ -306,14 +349,20 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
             <label className="grow" style={{ position: 'relative' }}>
               <span className="sr-only">Chercher un aliment</span>
               <Icon name="search" size={18} style={{ position: 'absolute', left: 12, top: 13, color: 'var(--ink3)' }} />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Riz, poulet, skyr…" style={{ paddingLeft: 38 }} enterKeyHint="search" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Œuf, riz, skyr, une marque…" style={{ paddingLeft: 38 }} enterKeyHint="search" />
             </label>
             <button className="icon-btn press" style={{ background: 'var(--ink)', color: 'var(--bg)' }} aria-label="Scanner un code-barres" onClick={() => setScan(true)}>
               <Icon name="scan" />
             </button>
           </div>
+          {!isOnline && (
+            <div className="row tiny muted" style={{ gap: 6 }}>
+              <Icon name="offline" size={16} />
+              Pas de réseau : recherche dans les aliments de base et les tiens. Les produits du commerce reviendront avec le réseau.
+            </div>
+          )}
 
-          {!q.trim() && favs.length > 0 && (
+          {!query && favs.length > 0 && (
             <div className="col" style={{ gap: 6 }}>
               <span className="small muted" style={{ fontWeight: 600 }}>
                 Repas favoris
@@ -340,26 +389,24 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
             </div>
           )}
 
-          {mine.length > 0 && (
-            <FoodList title={q.trim() ? 'Mes aliments' : 'Récents'} items={mine} onPick={setPicked} />
-          )}
-          {ciq.length > 0 && <FoodList title="Aliments (Ciqual)" items={ciq} onPick={setPicked} />}
-          {q.trim().length >= 2 && ciq.length === 0 && mine.length === 0 && ciqualReady && <div className="empty">Rien trouvé hors ligne pour « {q} ».</div>}
-
-          {q.trim().length >= 2 && (
-            <div className="col" style={{ gap: 8 }}>
-              {online ? (
-                online.length > 0 ? (
-                  <FoodList title="Produits du commerce (Open Food Facts)" items={online} onPick={setPicked} />
-                ) : (
-                  <div className="empty">Aucun produit trouvé en ligne.</div>
-                )
-              ) : (
-                <button className="btn ghost press" onClick={searchOnline} disabled={searching}>
-                  {searching ? 'Recherche…' : 'Chercher dans les produits du commerce'}
-                </button>
+          {mine.length > 0 && <FoodList title={query ? 'Mes aliments' : 'Récents'} items={mine} onPick={setPicked} />}
+          {ciq.length > 0 && <FoodList title="Aliments de base" items={ciq} onPick={setPicked} />}
+          {query.length >= 3 && isOnline && (
+            <>
+              {onlineState === 'loading' && <div className="small muted" style={{ padding: '4px 0' }}>Recherche dans les produits du commerce…</div>}
+              {onlineState === 'error' && (
+                <div className="row small" style={{ gap: 8, justifyContent: 'space-between' }}>
+                  <span className="muted">Open Food Facts ne répond pas pour l’instant.</span>
+                  <button className="chip press" onClick={() => setRetry((r) => r + 1)}>
+                    Réessayer
+                  </button>
+                </div>
               )}
-            </div>
+              {onlineItems.length > 0 && <FoodList title="Produits du commerce" items={onlineItems} onPick={setPicked} />}
+            </>
+          )}
+          {query.length >= 2 && ciq.length === 0 && mine.length === 0 && onlineItems.length === 0 && onlineState !== 'loading' && ciqualReady && (
+            <div className="empty">Rien trouvé pour « {q} ». Essaie un autre mot ou scanne le code-barres.</div>
           )}
 
           <button className="btn ghost press" onClick={() => setCreating({})}>
@@ -379,31 +426,62 @@ function FoodList({ title, items, onPick }: { title: string; items: FoodItem[]; 
         {title}
       </span>
       <div className="col" style={{ gap: 0, margin: '0 -12px' }}>
-        {items.map((f) => (
-          <button key={f.ref + f.name} className="list-row press" onClick={() => onPick(f)}>
-            {f.image ? (
-              <img src={f.image} alt="" width={36} height={36} style={{ borderRadius: 8, objectFit: 'cover', flex: 'none', background: 'var(--line2)' }} />
-            ) : null}
-            <div className="grow col" style={{ gap: 1 }}>
-              <span style={{ fontWeight: 600, fontSize: 15 }}>{f.name}</span>
-              <span className="tiny muted">
-                {f.brand ? f.brand + ' · ' : ''}
-                {Math.round(f.per100.k)} kcal · P {f.per100.p.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} · G{' '}
-                {f.per100.g.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} · L {f.per100.l.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} pour 100 g
-              </span>
-            </div>
-          </button>
-        ))}
+        {items.map((f) => {
+          const por = portionsFor(f.name, f.serving)[0];
+          const k1 = por ? Math.round((f.per100.k * por.grams) / 100) : null;
+          return (
+            <button key={f.ref + f.name} className="list-row press" onClick={() => onPick(f)}>
+              {f.image ? <img src={f.image} alt="" width={36} height={36} style={{ borderRadius: 8, objectFit: 'cover', flex: 'none', background: 'var(--line2)' }} /> : null}
+              <div className="grow col" style={{ gap: 1 }}>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>{f.name}</span>
+                <span className="tiny muted">
+                  {f.brand ? f.brand + ' · ' : ''}
+                  {por ? `1 ${por.one} ≈ ${k1} kcal` : `${Math.round(f.per100.k)} kcal pour 100 g`} · P {f.per100.p.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} G{' '}
+                  {f.per100.g.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} L {f.per100.l.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} /100 g
+                </span>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function QuantityPanel({ item, onBack, onConfirm, cta, initial, onDelete }: { item: FoodItem; onBack?: () => void; onConfirm: (g: number) => void; cta: string; initial?: number; onDelete?: () => void }) {
-  const remembered = getData<MyFood>('myfood:' + item.ref)?.lastGrams;
-  const [g, setG] = useState(initial ?? remembered ?? item.serving ?? 100);
-  const m: Macros = entryMacros({ grams: g, per100: item.per100 });
-  const chips = [...new Set([item.serving, remembered, 50, 100, 150, 200, 250].filter((x): x is number => !!x))].slice(0, 6);
+function QuantityPanel({
+  item,
+  onBack,
+  onConfirm,
+  cta,
+  initial,
+  onDelete,
+}: {
+  item: FoodItem;
+  onBack?: () => void;
+  onConfirm: (q: Qty) => void;
+  cta: string;
+  initial?: Qty;
+  onDelete?: () => void;
+}) {
+  const mem = getData<MyFood>('myfood:' + item.ref);
+  const portions = useMemo(() => portionsFor(item.name, item.serving), [item.name, item.serving]);
+  const startPortion =
+    (initial?.portion && portions.find((p) => p.one === initial.portion!.one)) ||
+    (!initial && mem?.lastPortion && portions.find((p) => p.one === mem.lastPortion!.one)) ||
+    (!initial || initial.portion ? portions[0] : undefined);
+  const [mode, setMode] = useState<'unit' | 'g'>(startPortion ? 'unit' : 'g');
+  const [por, setPor] = useState<Portion | undefined>(startPortion);
+  const [count, setCount] = useState(initial?.portion?.count ?? (!initial && mem?.lastPortion && startPortion?.one === mem.lastPortion.one ? mem.lastPortion.count : 1));
+  const [g, setG] = useState(initial?.grams ?? mem?.lastGrams ?? item.serving ?? 100);
+
+  const grams = mode === 'unit' && por ? Math.round(por.grams * count) : g;
+  const m: Macros = entryMacros({ grams, per100: item.per100 });
+  const chips = [...new Set([item.serving, mem?.lastGrams, 50, 100, 150, 200, 250].filter((x): x is number => !!x))].slice(0, 6);
+
+  function confirm() {
+    if (mode === 'unit' && por) onConfirm({ grams, portion: { ...por, count } });
+    else onConfirm({ grams: g });
+  }
 
   return (
     <div className="col" style={{ gap: 16 }}>
@@ -418,14 +496,71 @@ function QuantityPanel({ item, onBack, onConfirm, cta, initial, onDelete }: { it
           <span className="tiny muted">{item.brand ?? (item.src === 'ciqual' ? 'Table Ciqual' : item.src === 'off' ? 'Open Food Facts' : 'Mon aliment')}</span>
         </div>
       </div>
-      <Stepper value={g} onChange={setG} step={10} unit="g" min={1} />
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-        {chips.map((c) => (
-          <button key={c} className={'chip press' + (c === g ? ' on' : '')} onClick={() => setG(c)}>
-            {c} g{c === item.serving ? ' (portion)' : ''}
+
+      {portions.length > 0 && (
+        <div className="segmented" role="group" aria-label="Unité">
+          <button aria-pressed={mode === 'unit'} onClick={() => setMode('unit')}>
+            En {(por ?? portions[0]).many}
           </button>
-        ))}
-      </div>
+          <button
+            aria-pressed={mode === 'g'}
+            onClick={() => {
+              if (mode === 'unit') setG(grams);
+              setMode('g');
+            }}
+          >
+            En grammes
+          </button>
+        </div>
+      )}
+
+      {mode === 'unit' && por ? (
+        <>
+          {portions.length > 1 && (
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+              {portions.map((p) => (
+                <button key={p.one} className={'chip press' + (p.one === por.one ? ' on' : '')} onClick={() => setPor(p)}>
+                  1 {p.one} ({p.grams} g)
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="stepper">
+            <button className="press" aria-label="Moins" onClick={() => setCount(Math.max(0.5, count >= 1.5 ? count - 1 : 0.5))}>
+              <Icon name="minus" size={24} />
+            </button>
+            <output aria-live="polite" style={{ fontSize: 30, lineHeight: 1.15 }}>
+              {countText(count, por)}
+              <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--ink2)', marginTop: 2 }}>soit {grams} g</span>
+            </output>
+            <button className="press" aria-label="Plus" onClick={() => setCount(count < 1 ? 1 : count + 1)}>
+              <Icon name="plus" size={24} />
+            </button>
+          </div>
+          <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
+            {[0.5, 1, 2, 3, 4].map((c) => (
+              <button key={c} className={'chip press' + (c === count ? ' on' : '')} onClick={() => setCount(c)} style={{ minWidth: 48, justifyContent: 'center' }}>
+                {c === 0.5 ? '½' : c}
+              </button>
+            ))}
+          </div>
+          <p className="tiny muted" style={{ margin: 0, textAlign: 'center' }}>
+            Poids moyen : 1 {por.one} ≈ {por.grams} g. Passe en grammes si tu pèses.
+          </p>
+        </>
+      ) : (
+        <>
+          <Stepper value={g} onChange={setG} step={10} unit="g" min={1} />
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {chips.map((c) => (
+              <button key={c} className={'chip press' + (c === g ? ' on' : '')} onClick={() => setG(c)}>
+                {c} g{c === item.serving ? ' (portion)' : ''}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       <div className="card" style={{ background: 'var(--card2)', boxShadow: 'none', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', textAlign: 'center', gap: 4 }}>
         {[
           ['kcal', m.k, ''],
@@ -442,7 +577,7 @@ function QuantityPanel({ item, onBack, onConfirm, cta, initial, onDelete }: { it
           </div>
         ))}
       </div>
-      <button className="btn brand press" onClick={() => onConfirm(g)}>
+      <button className="btn brand press" onClick={confirm}>
         {cta}
       </button>
       {onDelete && (
@@ -463,10 +598,10 @@ function EditEntrySheet({ id, onClose }: { id: string | null; onClose: () => voi
         <QuantityPanel
           key={doc.id}
           item={{ name: doc.data.name, brand: doc.data.brand, per100: doc.data.per100, src: doc.data.src, ref: doc.data.ref ?? doc.id }}
-          initial={doc.data.grams}
+          initial={{ grams: doc.data.grams, portion: doc.data.portion }}
           cta="Enregistrer"
-          onConfirm={async (g) => {
-            await putDoc(doc.id, 'food', { ...doc.data, grams: g });
+          onConfirm={async (qty) => {
+            await putDoc(doc.id, 'food', { ...doc.data, grams: qty.grams, portion: qty.portion });
             onClose();
           }}
           onDelete={async () => {
@@ -500,7 +635,11 @@ function Scanner({ onCancel, onFound, onUnknown }: { onCancel: () => void; onFou
       else onUnknown(code);
     } catch {
       setState('error');
-      setMsg('Pas de réseau : impossible de trouver ce produit. Si tu l’as déjà scanné, il est dans tes récents.');
+      setMsg(
+        navigator.onLine
+          ? 'Open Food Facts ne répond pas pour l’instant. Réessaie dans un moment, ou tape le code-barres.'
+          : 'Pas de réseau : impossible de trouver ce produit. Si tu l’as déjà scanné, il est dans tes récents.'
+      );
     }
   }
 

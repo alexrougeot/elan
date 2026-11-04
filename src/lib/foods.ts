@@ -78,15 +78,24 @@ export function searchCiqual(q: string, limit = 40): FoodItem[] {
 const OFF = 'https://world.openfoodfacts.org';
 const FIELDS = 'code,product_name,product_name_fr,generic_name_fr,brands,nutriments,serving_quantity,image_front_small_url';
 
+function text(v: any): string {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) return text(v[0]);
+  if (typeof v === 'object') return text(v.fr ?? v.main ?? v.en ?? Object.values(v)[0]);
+  return String(v);
+}
+
 function fromOff(p: any): FoodItem | null {
   const n = p?.nutriments ?? {};
   let k = n['energy-kcal_100g'];
   if (k === undefined && n['energy_100g'] !== undefined) k = n['energy_100g'] / 4.184;
-  const name = (p.product_name_fr || p.product_name || p.generic_name_fr || '').trim();
-  if (!name || k === undefined) return null;
+  const name = (text(p.product_name_fr) || text(p.product_name) || text(p.generic_name_fr)).trim();
+  if (!name || k === undefined || p.code === undefined) return null;
+  const brand = text(p.brands).split(',')[0]?.trim();
   return {
     name,
-    brand: (p.brands || '').split(',')[0]?.trim() || undefined,
+    brand: brand || undefined,
     per100: {
       k: Math.round(Number(k) || 0),
       p: Number(n.proteins_100g) || 0,
@@ -95,28 +104,66 @@ function fromOff(p: any): FoodItem | null {
     },
     src: 'off',
     ref: 'off:' + p.code,
-    image: p.image_front_small_url,
+    image: text(p.image_front_small_url) || undefined,
     serving: Number(p.serving_quantity) || undefined,
   };
 }
 
+async function fetchJson(url: string, ms = 8000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    if (r.status === 404) return { status: 404 } as any;
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+const PROXY = (import.meta.env.VITE_SUPABASE_URL as string) + '/functions/v1/off';
+
 export async function offProduct(code: string): Promise<FoodItem | null | 'incomplete'> {
-  const r = await fetch(`${OFF}/api/v2/product/${encodeURIComponent(code)}.json?fields=${FIELDS}`);
-  if (r.status === 404) return null;
-  const j = await r.json();
-  if (j.status !== 1 || !j.product) return null;
+  let j: any;
+  try {
+    j = await fetchJson(`${PROXY}?code=${encodeURIComponent(code)}`, 10000);
+  } catch {
+    j = await fetchJson(`${OFF}/api/v2/product/${encodeURIComponent(code)}.json?fields=${FIELDS}`);
+  }
+  if (j.status === 404 || j.status !== 1 || !j.product) return null;
   return fromOff({ ...j.product, code }) ?? 'incomplete';
 }
 
+/** Recherche texte : nouveau moteur d'Open Food Facts, puis l'ancien si besoin */
 export async function offSearch(q: string): Promise<FoodItem[]> {
-  const url = `${OFF}/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&lc=fr&cc=fr&fields=${FIELDS}`;
-  const r = await fetch(url);
-  const j = await r.json();
-  return (j.products ?? []).map(fromOff).filter(Boolean) as FoodItem[];
+  const seen = new Set<string>();
+  const keep = (list: (FoodItem | null)[]) =>
+    list.filter((x): x is FoodItem => {
+      if (!x || seen.has(x.ref)) return false;
+      seen.add(x.ref);
+      return true;
+    });
+  try {
+    // Relais Élan (le plus fiable depuis l'iPhone)
+    const j = await fetchJson(`${PROXY}?q=${encodeURIComponent(q)}`, 12000);
+    return keep((j.products ?? []).map(fromOff));
+  } catch {
+    /* appel direct en secours */
+  }
+  try {
+    const j = await fetchJson(`https://search.openfoodfacts.org/search?q=${encodeURIComponent(q)}&langs=fr&page_size=24&fields=${FIELDS}`, 7000);
+    const hits = keep((j.hits ?? []).map(fromOff));
+    if (hits.length > 0) return hits;
+  } catch {
+    /* on essaie l'ancien moteur */
+  }
+  const j = await fetchJson(`${OFF}/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=24&lc=fr&cc=fr&fields=${FIELDS}`, 9000);
+  return keep((j.products ?? []).map(fromOff));
 }
 
 // ---- Mes aliments (scannés, créés, déjà utilisés) ----
-export type MyFood = FoodItem & { lastGrams?: number; usedAt?: string; count?: number };
+export type MyFood = FoodItem & { lastGrams?: number; lastPortion?: { one: string; count: number }; usedAt?: string; count?: number };
 
 export function myFoods() {
   return allOf<MyFood>('myfood')
@@ -124,13 +171,14 @@ export function myFoods() {
     .sort((a, b) => ((a.usedAt ?? '') < (b.usedAt ?? '') ? 1 : -1));
 }
 
-export async function rememberFood(item: FoodItem, grams?: number) {
+export async function rememberFood(item: FoodItem, grams?: number, portion?: { one: string; count: number }) {
   const id = 'myfood:' + item.ref;
   const prev = getDoc<MyFood>(id)?.data;
   await putDoc<MyFood>(id, 'myfood', {
     ...prev,
     ...item,
     lastGrams: grams ?? prev?.lastGrams,
+    lastPortion: grams ? portion : prev?.lastPortion,
     usedAt: new Date().toISOString(),
     count: (prev?.count ?? 0) + (grams ? 1 : 0),
   });

@@ -30,6 +30,8 @@ export type FoodEntry = {
   per100: Macros;
   src: 'ciqual' | 'off' | 'perso';
   ref?: string;
+  /** quantité saisie en unités (« 2 œufs »), le poids reste dans grams */
+  portion?: { count: number; one: string; many: string; grams: number };
   at: string;
 };
 
