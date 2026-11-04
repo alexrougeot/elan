@@ -141,7 +141,9 @@ function Shell() {
         <div className="tabbar-inner">
           {TABS.map((t) => (
             <button key={t.id} className="tab press" aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
-              <Icon name={t.icon} size={25} />
+              <span className="tab-ico">
+                <Icon name={t.icon} size={24} />
+              </span>
               {t.label}
             </button>
           ))}

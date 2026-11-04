@@ -35,7 +35,53 @@ const PATHS: Record<string, string> = {
   flag: 'M5 21 V4 M5 4 H17 L15 8 L17 12 H5',
   ruler: 'M3 16 L16 3 L21 8 L8 21 Z M7 12 L9 14 M10 9 L12 11 M13 6 L15 8',
   info: 'M12 3 A9 9 0 1 0 12 21 A9 9 0 1 0 12 3 Z M12 11 V16 M12 7.5 V8',
+  sunrise: 'M3 18 H21 M6.5 18 A5.5 5.5 0 0 1 17.5 18 M12 4 V7 M4.6 9.6 L6.4 11.1 M19.4 9.6 L17.6 11.1 M8 21 H16',
+  bolt: 'M13 3 L5 13.5 H11 L10 21 L19 10 H13 Z',
+  sun: 'M12 8 A4 4 0 1 0 12 16 A4 4 0 1 0 12 8 Z M12 2.5 V4.5 M12 19.5 V21.5 M2.5 12 H4.5 M19.5 12 H21.5 M5.3 5.3 L6.7 6.7 M17.3 17.3 L18.7 18.7 M5.3 18.7 L6.7 17.3 M17.3 6.7 L18.7 5.3',
+  apple: 'M12 7.5 C10 6 6 6.5 5.5 10.5 C5 15 8 20.5 10.5 20.5 C11.3 20.5 11.5 20 12 20 C12.5 20 12.7 20.5 13.5 20.5 C16 20.5 19 15 18.5 10.5 C18 6.5 14 6 12 7.5 Z M12 7.5 C12 5.5 13 4 15 3.5',
+  moon: 'M20 14.5 A8 8 0 1 1 9.5 4 A6.5 6.5 0 0 0 20 14.5 Z',
+  flame: 'M12 21 C8 21 5.5 18.3 5.5 14.8 C5.5 11 8.5 9 9.5 5.5 C11.5 7 12 9 12 10.5 C13.2 9.8 14 8.5 14.2 7 C16.8 9 18.5 11.8 18.5 14.8 C18.5 18.3 16 21 12 21 Z',
+  calendar: 'M4 6 H20 V20 H4 Z M4 10 H20 M8 3.5 V7 M16 3.5 V7',
 };
+
+/** Les feuilles du logo, en motif décoratif */
+export function HeroLeaves({ className = 'hero-leaves', color = '#ffffff' }: { className?: string; color?: string }) {
+  return (
+    <svg className={className} viewBox="4 6 200 200" aria-hidden="true">
+      <path d="M100 160 Q102.6 100.9 50 74 Q47.4 133.1 100 160 Z" fill={color} />
+      <path d="M100 160 Q161.7 123.5 156 52 Q94.3 88.5 100 160 Z" fill={color} />
+    </svg>
+  );
+}
+
+/** Icône et couleur de chaque repas, selon son heure */
+export function mealVisual(name: string, time: string): { icon: string; tint: string } {
+  const [h, m] = time.split(':').map(Number);
+  const t = h + m / 60;
+  if (/séance|seance|sport|training/i.test(name)) return { icon: 'bolt', tint: 'tint-brand' };
+  if (t < 10) return { icon: 'sunrise', tint: 'tint-orange' };
+  if (t < 14.5) return { icon: 'sun', tint: 'tint-amber' };
+  if (t < 18) return { icon: 'apple', tint: 'tint-lime' };
+  return { icon: 'moon', tint: 'tint-violet' };
+}
+
+const MUSCLE_TINT: Record<string, string> = {
+  Pectoraux: 'tint-orange',
+  Dos: 'tint-sky',
+  Épaules: 'tint-violet',
+  Biceps: 'tint-amber',
+  Triceps: 'tint-amber',
+  Quadriceps: 'tint-brand',
+  Ischios: 'tint-lime',
+  'Dos et jambes': 'tint-sky',
+  'Quadriceps et fessiers': 'tint-brand',
+  Fessiers: 'tint-lime',
+  Mollets: 'tint-brand',
+  Abdos: 'tint-violet',
+};
+export function muscleTint(muscle?: string) {
+  return (muscle && MUSCLE_TINT[muscle]) || 'tint-brand';
+}
 
 export function Icon({ name, size = 22, stroke = 2, className, style }: { name: string; size?: number; stroke?: number; className?: string; style?: React.CSSProperties }) {
   return (
@@ -80,6 +126,7 @@ export function Ring({
   size = 112,
   stroke = 12,
   color = 'var(--brand)',
+  track = 'var(--track)',
   children,
   label,
 }: {
@@ -87,6 +134,7 @@ export function Ring({
   size?: number;
   stroke?: number;
   color?: string;
+  track?: string;
   children?: ReactNode;
   label?: string;
 }) {
@@ -96,7 +144,7 @@ export function Ring({
   return (
     <div style={{ position: 'relative', width: size, height: size, flex: 'none' }} role={label ? 'img' : undefined} aria-label={label}>
       <svg viewBox="0 0 120 120" width={size} height={size} aria-hidden="true">
-        <circle cx="60" cy="60" r={r} style={{ fill: 'none', stroke: 'var(--track)', strokeWidth: stroke }} />
+        <circle cx="60" cy="60" r={r} style={{ fill: 'none', stroke: track, strokeWidth: stroke }} />
         {v > 0 && (
           <circle
             cx="60"

@@ -5,7 +5,7 @@ import { entryMacros, foodsOn, getTargets, mealTarget, sum, totalsOn, type FoodE
 import { loadCiqual, offProduct, offSearch, rememberFood, searchCiqual, searchMine, myFoods, type FoodItem, type MyFood } from '../lib/foods';
 import { currentSubscription, enablePush, pushSupported } from '../lib/push';
 import { haptic, isIOS, isStandalone } from '../lib/device';
-import { Icon, Ring, Sheet, Stepper, showToast } from '../components/ui';
+import { HeroLeaves, Icon, Ring, Sheet, Stepper, mealVisual, showToast } from '../components/ui';
 
 type FavMeal = { name: string; items: (FoodItem & { grams: number })[] };
 
@@ -82,17 +82,18 @@ export default function Nutrition() {
         </div>
       </header>
 
-      <section className="card col" style={{ gap: 16 }}>
+      <section className="hero col" style={{ gap: 16 }}>
+        <HeroLeaves />
         <div className="row" style={{ gap: 18 }}>
-          <Ring value={totals.k / targets.kcal} size={104} color={left < -150 ? 'var(--amber)' : 'var(--brand)'} label={`${fmtNum(Math.abs(left))} kilocalories ${left >= 0 ? 'restantes' : 'en trop'}`}>
-            <span style={{ fontSize: 21, fontWeight: 700, letterSpacing: '-0.02em' }}>{fmtNum(Math.abs(left))}</span>
-            <span className="tiny muted">{left >= 0 ? 'kcal restantes' : 'kcal en trop'}</span>
+          <Ring value={totals.k / targets.kcal} size={108} stroke={13} color={left < -150 ? '#FCD34D' : '#BEF264'} track="rgba(255,255,255,0.18)" label={`${fmtNum(Math.abs(left))} kilocalories ${left >= 0 ? 'restantes' : 'en trop'}`}>
+            <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: '#fff' }}>{fmtNum(Math.abs(left))}</span>
+            <span className="tiny on-hero-2">{left >= 0 ? 'kcal restantes' : 'kcal en trop'}</span>
           </Ring>
           <div className="col" style={{ gap: 4 }}>
-            <span style={{ fontSize: 17, fontWeight: 700 }}>{fmtNum(totals.k)} kcal mangées</span>
-            <span className="small muted">Objectif : {fmtNum(targets.kcal)} kcal</span>
+            <span style={{ fontSize: 18, fontWeight: 700 }}>{fmtNum(totals.k)} kcal mangées</span>
+            <span className="small on-hero-2">Objectif : {fmtNum(targets.kcal)} kcal</span>
             {targets.history.filter((h) => !h.undone).slice(-1).map((h) => (
-              <span key={h.date} className="tiny" style={{ fontWeight: 600, color: 'var(--brand-ink)' }}>
+              <span key={h.date} className="hero-chip" style={{ alignSelf: 'flex-start', marginTop: 4 }}>
                 Ajusté le {new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} : {h.delta > 0 ? '+' : ''}
                 {h.delta} kcal
               </span>
@@ -101,16 +102,16 @@ export default function Nutrition() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
           {[
-            ['Protéines', totals.p, targets.p, '#059669'],
-            ['Glucides', totals.g, targets.g, 'var(--lime)'],
-            ['Lipides', totals.l, targets.l, 'var(--amber)'],
+            ['Protéines', totals.p, targets.p, '#A7F3D0'],
+            ['Glucides', totals.g, targets.g, '#BEF264'],
+            ['Lipides', totals.l, targets.l, '#FCD34D'],
           ].map(([l, v, t, c]) => (
             <div key={l as string} className="col" style={{ gap: 4 }}>
-              <span className="tiny muted">{l as string}</span>
-              <span style={{ fontSize: 14, fontWeight: 650 }}>
+              <span className="tiny on-hero-2">{l as string}</span>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>
                 {Math.round(v as number)} / {t as number} g
               </span>
-              <div className="bar">
+              <div className="bar" style={{ background: 'rgba(255,255,255,0.18)' }}>
                 <div style={{ width: Math.min(100, ((v as number) / (t as number)) * 100) + '%', background: c as string }} />
               </div>
             </div>
@@ -144,22 +145,26 @@ export default function Nutrition() {
         const tgt = mealTarget(targets, i);
         return (
           <section key={i} className="card col" style={{ gap: 10 }}>
-            <div className="row between">
-              <div className="col" style={{ gap: 1 }}>
+            <div className="row">
+              <span className={'tile ' + mealVisual(m.name, m.time).tint}>
+                <Icon name={mealVisual(m.name, m.time).icon} />
+              </span>
+              <div className="grow col" style={{ gap: 1 }}>
                 <span className="tiny muted" style={{ fontWeight: 600 }}>
                   {hhmm(m.time)}
                 </span>
                 <h2 className="h2">{m.name}</h2>
               </div>
-              <div className="col" style={{ alignItems: 'flex-end', gap: 1 }}>
-                <span style={{ fontWeight: 700 }}>
-                  {fmtNum(got.k)} <span className="muted small">/ {tgt.k} kcal</span>
-                </span>
-                <span className="tiny muted">
-                  P {Math.round(got.p)}/{tgt.p} · G {Math.round(got.g)}/{tgt.g} · L {Math.round(got.l)}/{tgt.l}
-                </span>
-              </div>
+              <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
+                {fmtNum(got.k)} <span className="muted small">/ {tgt.k} kcal</span>
+              </span>
             </div>
+            <div className="progress-line" style={{ height: 5 }}>
+              <div style={{ width: Math.min(100, (got.k / (tgt.k || 1)) * 100) + '%' }} />
+            </div>
+            <span className="tiny muted">
+              Protéines {Math.round(got.p)}/{tgt.p} g · Glucides {Math.round(got.g)}/{tgt.g} g · Lipides {Math.round(got.l)}/{tgt.l} g
+            </span>
             {items.length === 0 && m.hint && <span className="small muted">{m.hint}</span>}
             {items.length > 0 && (
               <div className="col" style={{ gap: 0, margin: '0 -10px' }}>

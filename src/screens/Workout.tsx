@@ -6,7 +6,7 @@ import { CATALOG, estimateMinutes, exName, platesFor, type Program, type Program
 import { bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
 import { activeSession, adjustRest, getProgram, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest } from '../lib/workout';
 import { haptic, keepScreenOn, unlockAudio } from '../lib/device';
-import { Icon, Ring, Sheet, Stepper, showToast, useNow } from '../components/ui';
+import { HeroLeaves, Icon, Ring, Sheet, Stepper, muscleTint, showToast, useNow } from '../components/ui';
 
 export default function Workout({ go }: { go: (t: Tab) => void }) {
   useStoreVersion();
@@ -51,31 +51,37 @@ function Planner({ go }: { go: (t: Tab) => void }) {
       ) : (
         <>
           {plan && (
-            <section className="card col" style={{ gap: 14 }}>
+            <section className="hero col" style={{ gap: 14 }}>
+              <HeroLeaves />
               <div className="row between">
-                <div className="col" style={{ gap: 2 }}>
-                  <span className="tiny muted" style={{ fontWeight: 500 }}>
-                    Aujourd’hui
-                  </span>
-                  <h2 className="h2" style={{ fontSize: 22 }}>
-                    {plan.title}
-                    {plan.subtitle ? ' · ' + plan.subtitle : ''}
-                  </h2>
-                </div>
-                <span className="badge gray">{estimateMinutes(plan)} min</span>
+                <span className="hero-chip">
+                  <Icon name="calendar" size={15} />
+                  Aujourd’hui
+                </span>
+                <span className="hero-chip">
+                  <Icon name="timer" size={15} />
+                  {estimateMinutes(plan)} min
+                </span>
               </div>
-              <div className="col" style={{ gap: 6 }}>
+              <h2 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                {plan.title}
+                {plan.subtitle ? ' · ' + plan.subtitle : ''}
+              </h2>
+              <div className="col" style={{ gap: 8 }}>
                 {plan.exercises.map((e, i) => (
                   <div key={i} className="row between small">
-                    <span style={{ fontWeight: 600 }}>{exName(e.key)}</span>
-                    <span className="muted">
+                    <span className="row" style={{ gap: 10, fontWeight: 600 }}>
+                      <span style={{ width: 22, height: 22, borderRadius: 11, background: 'rgba(255,255,255,0.16)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>{i + 1}</span>
+                      {exName(e.key)}
+                    </span>
+                    <span className="on-hero-2">
                       {e.sets} × {e.min === e.max ? e.min : `${e.min}-${e.max}`}
                       {CATALOG[e.key]?.timed ? ' s' : ''}
                     </span>
                   </div>
                 ))}
               </div>
-              <button className="btn brand press" onClick={() => start(plan)} disabled={busy}>
+              <button className="hero-btn press" onClick={() => start(plan)} disabled={busy}>
                 <Icon name="dumbbell" />
                 {doneToday ? 'Refaire cette séance' : 'Commencer la séance'}
               </button>
@@ -91,6 +97,9 @@ function Planner({ go }: { go: (t: Tab) => void }) {
               .map((d, i, arr) => (
                 <div key={d.id}>
                   <button className="list-row press" onClick={() => start(d)}>
+                    <span className="tile sm tint-sky">
+                      <Icon name="dumbbell" size={18} />
+                    </span>
                     <div className="grow col" style={{ gap: 2 }}>
                       <span style={{ fontWeight: 600 }}>
                         {d.title}
@@ -121,6 +130,9 @@ function Planner({ go }: { go: (t: Tab) => void }) {
               return (
                 <div key={s.id}>
                   <div className="list-row">
+                    <span className="tile sm tint-brand">
+                      <Icon name="check" size={18} stroke={2.6} />
+                    </span>
                     <div className="grow col" style={{ gap: 2 }}>
                       <span style={{ fontWeight: 600 }}>{s.data.title}</span>
                       <span className="small muted">
@@ -237,6 +249,9 @@ function SessionView({ id }: { id: string }) {
           Terminer
         </button>
       </header>
+      <div className="progress-line" role="progressbar" aria-valuemin={0} aria-valuemax={totalSets} aria-valuenow={doneSets} aria-label="Progression de la séance">
+        <div style={{ width: (totalSets ? (doneSets / totalSets) * 100 : 0) + '%' }} />
+      </div>
 
       {s.deload && (
         <div className="card row" style={{ background: 'var(--amber-tint)', boxShadow: 'none' }}>
@@ -312,7 +327,12 @@ function ExerciseCard({
   return (
     <section className="card col" style={{ gap: 12, boxShadow: isCurrent ? 'var(--shadow), inset 0 0 0 1.5px color-mix(in srgb, var(--brand) 40%, transparent)' : undefined }}>
       <button className="row" style={{ border: 'none', background: 'none', padding: 0, textAlign: 'left', minHeight: 44 }} onClick={onToggle} aria-expanded={open}>
-        <div className="grow col" style={{ gap: 2 }}>
+        <div className="grow col" style={{ gap: 4 }}>
+          {def && (
+            <span className={'muscle ' + muscleTint(def.muscle)} style={{ alignSelf: 'flex-start' }}>
+              {def.muscle}
+            </span>
+          )}
           <span style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.015em' }}>{exName(ex.key)}</span>
           <span className="small muted">
             {ex.sets.length} × {range}

@@ -1,27 +1,22 @@
 import { useEffect, useState } from 'react';
 import type { Tab } from '../App';
 import { getData, useStoreVersion } from '../lib/store';
-import { dayKey, fmtKg, fmtNum, hhmm, longDate, minutesOf, nowMinutes } from '../lib/dates';
-import {
-  currentWeight,
-  foodsOn,
-  getTargets,
-  isSunday,
-  mealTarget,
-  runWeeklyAdjustment,
-  sum,
-  entryMacros,
-  totalsOn,
-  undoAdjustment,
-  type Profile,
-} from '../lib/nutrition';
-import { estimateMinutes } from '../lib/program';
+import { addDays, dayKey, fmtKg, fmtNum, hhmm, longDate, minutesOf, nowMinutes, parseDay, weekStart, weekday } from '../lib/dates';
+import { currentWeight, entryMacros, foodsOn, getTargets, isSunday, mealTarget, runWeeklyAdjustment, sum, totalsOn, undoAdjustment, type Profile } from '../lib/nutrition';
+import { estimateMinutes, exName } from '../lib/program';
 import { activeSession, extraFor, getProgram, planFor, sessionToday } from '../lib/workout';
-import { isDeloadWeek } from '../lib/coach';
+import { isDeloadWeek, sessions } from '../lib/coach';
 import { useSyncStatus } from '../lib/sync';
-import { Icon, LogoMark, MacroBar, Ring, showToast } from '../components/ui';
+import { HeroLeaves, Icon, LogoMark, Ring, mealVisual, showToast } from '../components/ui';
 import WeighInSheet from '../components/WeighIn';
 import WeeklyReview from '../components/WeeklyReview';
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h >= 18) return 'Bonsoir';
+  if (h >= 13) return 'Bon après-midi';
+  return 'Bonjour';
+}
 
 export default function Today({ go, openSettings }: { go: (t: Tab) => void; openSettings: () => void }) {
   useStoreVersion();
@@ -53,25 +48,39 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   const now = nowMinutes();
   const foods = foodsOn(today);
   const meals = targets?.meals ?? [];
-  let next = meals.findIndex((m, i) => {
-    const eaten = foods.some((f) => f.data.meal === i);
-    return !eaten && minutesOf(m.time) >= now - 45;
-  });
+  let next = meals.findIndex((m, i) => !foods.some((f) => f.data.meal === i) && minutesOf(m.time) >= now - 45);
   if (next < 0) next = meals.findIndex((_, i) => !foods.some((f) => f.data.meal === i));
   const nextTarget = targets && next >= 0 ? mealTarget(targets, next) : null;
   const nextEaten = next >= 0 ? sum(foods.filter((f) => f.data.meal === next).map((f) => entryMacros(f.data))) : null;
+
+  // Semaine
+  const monday = weekStart(today);
+  const doneDates = new Set(sessions().filter((s) => s.data.endedAt).map((s) => s.data.date));
+  const plannedDays = new Set(program?.days.map((d) => d.weekday) ?? []);
+  const extraDays = new Set(program?.extras.map((d) => d.weekday) ?? []);
+  const week = Array.from({ length: 7 }, (_, i) => {
+    const key = addDays(monday, i);
+    const wd = weekday(parseDay(key));
+    const started = !program || key >= program.startDate;
+    const state = doneDates.has(key) ? 'done' : plannedDays.has(wd) && started ? (key < today ? 'missed' : 'planned') : extraDays.has(wd) && started ? 'extra' : '';
+    return { key, wd, state, day: parseDay(key).getDate() };
+  });
+  const doneThisWeek = week.filter((d) => d.state === 'done').length;
 
   const start = profile.weight;
   const goalW = profile.goalWeight;
   const progress = weight !== undefined && goalW !== start ? Math.max(0, Math.min(1, (weight - start) / (goalW - start))) : 0;
   const deload = program ? isDeloadWeek(program) : false;
+  const left = targets ? targets.kcal - totals.k : 0;
 
   return (
     <main className="screen">
       <header className="screen-head">
         <div className="col" style={{ gap: 2 }}>
           <span className="eyebrow">{longDate(today)}</span>
-          <h1 className="title">Bonjour {profile.name}</h1>
+          <h1 className="title">
+            {greeting()} {profile.name}
+          </h1>
         </div>
         <div className="row" style={{ gap: 8 }}>
           <button className="icon-btn press" aria-label="Réglages" onClick={openSettings}>
@@ -88,6 +97,45 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         </div>
       )}
 
+      {/* Calories : la carte héros */}
+      {targets && (
+        <button className="hero press col" style={{ border: 'none', textAlign: 'left', gap: 14 }} onClick={() => go('nutrition')}>
+          <HeroLeaves />
+          <div className="row between">
+            <span className="hero-chip">
+              <Icon name="flame" size={15} />
+              Calories du jour
+            </span>
+            <span className="small on-hero-2">{Math.round((totals.k / targets.kcal) * 100)} %</span>
+          </div>
+          <div className="row" style={{ gap: 18 }}>
+            <Ring value={totals.k / targets.kcal} size={116} stroke={13} color="#BEF264" track="rgba(255,255,255,0.18)" label={`${fmtNum(Math.abs(left))} kilocalories ${left >= 0 ? 'restantes' : 'en trop'}`}>
+              <span style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-0.02em', color: '#fff' }}>{fmtNum(Math.abs(left))}</span>
+              <span className="tiny on-hero-2">{left >= 0 ? 'kcal restantes' : 'kcal en trop'}</span>
+            </Ring>
+            <div className="grow col" style={{ gap: 11 }}>
+              {[
+                ['Protéines', totals.p, targets.p, '#A7F3D0'],
+                ['Glucides', totals.g, targets.g, '#BEF264'],
+                ['Lipides', totals.l, targets.l, '#FCD34D'],
+              ].map(([l, v, t, c]) => (
+                <div key={l as string} className="col" style={{ gap: 5 }}>
+                  <div className="row between small">
+                    <span style={{ fontWeight: 650 }}>{l as string}</span>
+                    <span className="on-hero-2">
+                      {Math.round(v as number)} / {t as number} g
+                    </span>
+                  </div>
+                  <div className="bar" style={{ background: 'rgba(255,255,255,0.18)' }}>
+                    <div style={{ width: Math.min(100, ((v as number) / (t as number)) * 100) + '%', background: c as string }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </button>
+      )}
+
       {deload && (
         <div className="card row" style={{ background: 'var(--amber-tint)', boxShadow: 'none' }}>
           <Icon name="info" style={{ color: 'var(--amber-ink)' }} />
@@ -98,100 +146,134 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
       )}
 
       {/* Séance */}
-      <button className="card press col" style={{ border: 'none', textAlign: 'left', gap: 12 }} onClick={() => go('workout')}>
+      <section className="card col" style={{ gap: 12 }}>
         <div className="row">
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--brand-tint)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>
-            <Icon name="dumbbell" style={{ color: 'var(--brand-ink)' }} />
-          </div>
+          <span className="tile tint-brand">
+            <Icon name="dumbbell" />
+          </span>
           <div className="grow col" style={{ gap: 2 }}>
             <span className="tiny muted" style={{ fontWeight: 500 }}>
               Séance du jour
             </span>
-            <span style={{ fontSize: 17, fontWeight: 700 }}>
-              {active ? `${active.data.title} · en cours` : plan ? `${plan.title}${plan.subtitle ? ' · ' + plan.subtitle : ''}` : 'Repos'}
+            <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.01em' }}>
+              {active ? active.data.title : plan ? `${plan.title}${plan.subtitle ? ' · ' + plan.subtitle : ''}` : 'Repos'}
             </span>
           </div>
           {done?.data.endedAt ? (
-            <span className="badge">Terminée</span>
+            <span className="badge">
+              <Icon name="check" size={13} stroke={2.8} />
+              Terminée
+            </span>
           ) : active ? (
             <span className="badge amber">En cours</span>
           ) : plan ? (
             <span className="badge gray">{estimateMinutes(plan)} min</span>
           ) : null}
         </div>
-        <span className="small muted">
-          {active
-            ? 'Touche pour reprendre où tu en étais.'
-            : done?.data.endedAt
-              ? 'Bien joué. Pense à bien manger après la séance.'
-              : plan
-                ? `${plan.exercises.length} exercices · touche pour commencer`
-                : extra
-                  ? extra.title
-                  : 'Pas de séance prévue aujourd’hui : récupère bien.'}
-        </span>
-        {extra && plan && <span className="small muted">Et aussi : {extra.title}</span>}
-      </button>
-
-      {/* Calories */}
-      {targets && (
-        <button className="card press row" style={{ border: 'none', textAlign: 'left', gap: 18, alignItems: 'center' }} onClick={() => go('nutrition')}>
-          <Ring value={totals.k / targets.kcal} size={108} label={`${fmtNum(totals.k)} sur ${fmtNum(targets.kcal)} kilocalories`}>
-            <span style={{ fontSize: 21, fontWeight: 700, letterSpacing: '-0.02em' }}>{fmtNum(totals.k)}</span>
-            <span className="tiny muted">sur {fmtNum(targets.kcal)} kcal</span>
-          </Ring>
-          <div className="grow col" style={{ gap: 10 }}>
-            <MacroBar label="Protéines" value={totals.p} target={targets.p} color="#059669" />
-            <MacroBar label="Glucides" value={totals.g} target={targets.g} color="var(--lime)" />
-            <MacroBar label="Lipides" value={totals.l} target={targets.l} color="var(--amber)" />
+        {plan && !done?.data.endedAt && (
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            {plan.exercises.slice(0, 3).map((e, i) => (
+              <span key={i} className="muscle" style={{ background: 'var(--line2)', color: 'var(--ink2)', fontWeight: 600 }}>
+                {exName(e.key)}
+              </span>
+            ))}
+            {plan.exercises.length > 3 && (
+              <span className="muscle" style={{ background: 'var(--line2)', color: 'var(--ink2)', fontWeight: 600 }}>
+                +{plan.exercises.length - 3}
+              </span>
+            )}
           </div>
-        </button>
+        )}
+        {!plan && !active && <span className="small muted">{extra ? extra.title : 'Pas de séance prévue aujourd’hui : récupère bien.'}</span>}
+        {done?.data.endedAt && <span className="small muted">Bien joué. Pense à bien manger après la séance.</span>}
+        {(plan || active) && !done?.data.endedAt && (
+          <button className="btn brand press" style={{ minHeight: 48 }} onClick={() => go('workout')}>
+            <Icon name={active ? 'timer' : 'dumbbell'} size={20} />
+            {active ? 'Reprendre la séance' : 'Commencer'}
+          </button>
+        )}
+        {extra && plan && <span className="small muted">Et aussi : {extra.title.toLowerCase()}</span>}
+      </section>
+
+      {/* Semaine */}
+      {program && program.days.length > 0 && (
+        <section className="card col" style={{ gap: 12 }}>
+          <div className="row between">
+            <h2 className="h2">Ta semaine</h2>
+            <span className="small muted">
+              {doneThisWeek} / {program.days.length} séances
+            </span>
+          </div>
+          <div className="week">
+            {week.map((d) => (
+              <div key={d.key} className={'week-day' + (d.key === today ? ' today' : '')}>
+                <span>{'LMMJVSD'[d.wd - 1]}</span>
+                <div className={'week-dot ' + d.state} aria-label={`${d.day}, ${d.state === 'done' ? 'séance faite' : d.state === 'planned' ? 'séance prévue' : d.state === 'missed' ? 'séance manquée' : d.state === 'extra' ? 'cours collectif' : 'repos'}`}>
+                  {d.state === 'done' ? <Icon name="check" size={16} stroke={2.8} /> : d.state === 'extra' ? <Icon name="flame" size={15} /> : d.day}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Prochain repas */}
       {targets && next >= 0 && nextTarget && (
         <button
           className="card press col"
-          style={{ border: 'none', textAlign: 'left', gap: 6, background: 'var(--feature)', color: 'var(--feature-ink)', boxShadow: 'none' }}
+          style={{ border: 'none', textAlign: 'left', gap: 10, background: 'var(--feature)', color: 'var(--feature-ink)', boxShadow: 'none', position: 'relative', overflow: 'hidden' }}
           onClick={() => go('nutrition')}
         >
-          <div className="row between">
-            <span className="tiny" style={{ fontWeight: 700, color: 'var(--feature-accent)' }}>
-              Prochain repas · {hhmm(meals[next].time)}
+          <HeroLeaves className="hero-leaves" color="#10B981" />
+          <div className="row" style={{ position: 'relative' }}>
+            <span className={'tile ' + mealVisual(meals[next].name, meals[next].time).tint}>
+              <Icon name={mealVisual(meals[next].name, meals[next].time).icon} />
             </span>
+            <div className="grow col" style={{ gap: 1 }}>
+              <span className="tiny" style={{ fontWeight: 700, color: 'var(--feature-accent)' }}>
+                Prochain repas · {hhmm(meals[next].time)}
+              </span>
+              <span style={{ fontSize: 19, fontWeight: 700 }}>{meals[next].name}</span>
+            </div>
             <Icon name="bell" size={20} style={{ color: 'var(--feature-accent)' }} />
           </div>
-          <span style={{ fontSize: 19, fontWeight: 700 }}>{meals[next].name}</span>
-          <span className="small" style={{ color: 'var(--feature-ink2)' }}>
-            {nextTarget.k} kcal · P {nextTarget.p} g · G {nextTarget.g} g · L {nextTarget.l} g
-            {nextEaten && nextEaten.k > 0 ? ` · déjà ${Math.round(nextEaten.k)} kcal` : ''}
-          </span>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', position: 'relative' }}>
+            <span className="hero-chip" style={{ background: 'rgba(255,255,255,0.1)' }}>{nextTarget.k} kcal</span>
+            <span className="hero-chip" style={{ background: 'rgba(255,255,255,0.1)' }}>P {nextTarget.p} g</span>
+            <span className="hero-chip" style={{ background: 'rgba(255,255,255,0.1)' }}>G {nextTarget.g} g</span>
+            <span className="hero-chip" style={{ background: 'rgba(255,255,255,0.1)' }}>L {nextTarget.l} g</span>
+          </div>
           {meals[next].hint && (
-            <span className="small" style={{ color: '#94A3B8' }}>
+            <span className="small" style={{ color: 'var(--feature-ink2)', position: 'relative' }}>
               {meals[next].hint}
+              {nextEaten && nextEaten.k > 0 ? ` Déjà ${Math.round(nextEaten.k)} kcal notées.` : ''}
             </span>
           )}
         </button>
       )}
 
       {/* Poids */}
-      <section className="card col" style={{ gap: 10 }}>
-        <div className="row between" style={{ alignItems: 'flex-end' }}>
-          <div className="col" style={{ gap: 2 }}>
+      <section className="card col" style={{ gap: 12 }}>
+        <div className="row">
+          <span className="tile tint-sky">
+            <Icon name="scale" />
+          </span>
+          <div className="grow col" style={{ gap: 1 }}>
             <span className="tiny muted" style={{ fontWeight: 500 }}>
               Poids moyen sur 7 jours
             </span>
             <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>{weight !== undefined ? fmtKg(weight) + ' kg' : '—'}</span>
           </div>
           {profile.goal !== 'maintien' && (
-            <span className="small" style={{ fontWeight: 600, color: 'var(--brand-ink)' }}>
-              Objectif {fmtKg(goalW, goalW % 1 ? 1 : 0)} kg
-            </span>
+            <div className="col" style={{ alignItems: 'flex-end', gap: 1 }}>
+              <span className="tiny muted">Objectif</span>
+              <span style={{ fontWeight: 700, color: 'var(--brand-ink)' }}>{fmtKg(goalW, goalW % 1 ? 1 : 0)} kg</span>
+            </div>
           )}
         </div>
         {profile.goal !== 'maintien' && (
-          <div className="bar" style={{ height: 8 }}>
-            <div style={{ width: Math.max(3, progress * 100) + '%', background: 'var(--brand)' }} />
+          <div className="progress-line" style={{ height: 8 }}>
+            <div style={{ width: Math.max(3, progress * 100) + '%' }} />
           </div>
         )}
         <div className="row between">
@@ -201,7 +283,6 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
               : 'Pèse-toi chaque matin pour suivre la tendance.'}
           </span>
           <button className={'btn small press ' + (weightToday ? 'ghost' : 'soft')} onClick={() => setWeighIn(true)}>
-            <Icon name="scale" size={18} />
             {weightToday ? 'Modifier' : 'Me peser'}
           </button>
         </div>
@@ -209,7 +290,9 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
 
       {isSunday() && (
         <button className="card press row" style={{ border: 'none', textAlign: 'left' }} onClick={() => setReview(true)}>
-          <Icon name="flag" style={{ color: 'var(--brand-ink)' }} />
+          <span className="tile tint-violet">
+            <Icon name="flag" />
+          </span>
           <div className="grow col" style={{ gap: 2 }}>
             <span style={{ fontWeight: 700 }}>Bilan de la semaine</span>
             <span className="small muted">Tes séances, tes calories, ton poids et l’ajustement.</span>

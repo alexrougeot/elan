@@ -5,7 +5,7 @@ import { avg7, currentWeight, eta, getTargets, targetRate, undoAdjustment, weekA
 import { e1rm, sessions } from '../lib/coach';
 import { CATALOG, exName } from '../lib/program';
 import { compressImage, haptic } from '../lib/device';
-import { Icon, Sheet, showToast } from '../components/ui';
+import { HeroLeaves, Icon, Sheet, showToast } from '../components/ui';
 import WeighInSheet from '../components/WeighIn';
 import WeeklyReview from '../components/WeeklyReview';
 
@@ -83,25 +83,27 @@ function WeightView() {
   return (
     <>
       {profile.goal !== 'maintien' && (
-        <section className="card col" style={{ gap: 10 }}>
-          <span className="tiny muted" style={{ fontWeight: 500 }}>
+        <section className="hero col" style={{ gap: 10 }}>
+          <HeroLeaves />
+          <span className="hero-chip" style={{ alignSelf: 'flex-start' }}>
+            <Icon name="flag" size={15} />
             Objectif {profile.goal === 'masse' ? 'prise de masse' : 'sèche'}
           </span>
           <div className="row" style={{ gap: 10, alignItems: 'baseline' }}>
             <span className="big-num">{fmtKg(current)} kg</span>
-            <Icon name="right" size={18} style={{ color: 'var(--ink3)' }} />
-            <span className="big-num" style={{ color: 'var(--brand-ink)' }}>
+            <Icon name="right" size={18} style={{ color: 'rgba(255,255,255,0.7)' }} />
+            <span className="big-num" style={{ color: '#BEF264' }}>
               {fmtKg(profile.goalWeight, profile.goalWeight % 1 ? 1 : 0)} kg
             </span>
           </div>
-          <div className="bar" style={{ height: 8 }}>
-            <div style={{ width: Math.max(3, progress * 100) + '%', background: 'var(--brand)' }} />
+          <div className="bar" style={{ height: 8, background: 'rgba(255,255,255,0.18)' }}>
+            <div style={{ width: Math.max(3, progress * 100) + '%', background: '#BEF264' }} />
           </div>
           <div className="row between small">
-            <span className="muted">Encore {fmtKg(Math.abs(toGo))} kg</span>
+            <span className="on-hero-2">Encore {fmtKg(Math.abs(toGo))} kg</span>
             {arrival && <span style={{ fontWeight: 600 }}>Arrivée estimée : {monthYear(arrival)}</span>}
           </div>
-          <span className="tiny muted">
+          <span className="tiny on-hero-2">
             {realRate !== undefined
               ? `Ton rythme actuel : ${realRate.toLocaleString('fr-FR', { maximumFractionDigits: 2, signDisplay: 'always' })} kg par semaine.`
               : `Au rythme visé de ${rate.toLocaleString('fr-FR')} kg par semaine. Ton vrai rythme s’affichera après quelques semaines de pesées.`}
@@ -222,6 +224,12 @@ function WeightChart({ profile, arrival }: { profile: Profile; arrival: Date | n
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`Courbe de poids, actuellement ${fmtKg(cur)} kilos`} style={{ display: 'block' }}>
+      <defs>
+        <linearGradient id="elan-area" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#10B981" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="#10B981" stopOpacity="0" />
+        </linearGradient>
+      </defs>
       {ticks.map((t) => (
         <g key={t}>
           <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} style={{ stroke: 'var(--line2)', strokeWidth: 1 }} />
@@ -246,6 +254,12 @@ function WeightChart({ profile, arrival }: { profile: Profile; arrival: Date | n
       {list.map((w) => (
         <circle key={w.date} cx={x(w.date)} cy={y(w.kg)} r={2.6} style={{ fill: 'var(--brand)', opacity: 0.45 }} />
       ))}
+      {list.length > 1 && (
+        <polygon
+          points={`${x(list[0].date).toFixed(1)},${(H - padB).toFixed(1)} ${avgPts} ${x(list[list.length - 1].date).toFixed(1)},${(H - padB).toFixed(1)}`}
+          style={{ fill: 'url(#elan-area)', stroke: 'none' }}
+        />
+      )}
       {list.length > 1 && <polyline points={avgPts} style={{ fill: 'none', stroke: 'var(--brand-ink)', strokeWidth: 2.5, strokeLinejoin: 'round', strokeLinecap: 'round' }} />}
       <circle cx={x(today)} cy={y(cur)} r={5} style={{ fill: 'var(--brand)', stroke: 'var(--card)', strokeWidth: 2 }} />
     </svg>
@@ -346,7 +360,9 @@ function BodyView() {
   return (
     <>
       <button className="card press row" style={{ border: 'none', textAlign: 'left', background: due ? 'var(--brand-tint)' : undefined }} onClick={() => setOpen(true)}>
-        <Icon name="ruler" style={{ color: 'var(--brand-ink)' }} />
+        <span className="tile tint-violet">
+          <Icon name="ruler" />
+        </span>
         <div className="grow col" style={{ gap: 2 }}>
           <span style={{ fontWeight: 700, color: due ? 'var(--brand-deep)' : undefined }}>{due ? 'C’est le moment de tes mesures du mois' : 'Ajouter des mesures'}</span>
           <span className="small" style={{ color: due ? 'var(--brand-deep)' : 'var(--ink2)' }}>
