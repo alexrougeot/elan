@@ -4,6 +4,7 @@ import { adjustmentFor, getTargets, isSunday, totalsOn, weekAvg, type Profile } 
 import { sessions } from '../lib/coach';
 import { getProgram, sessionRecords } from '../lib/workout';
 import { exName } from '../lib/program';
+import { healthBetween } from '../lib/health';
 import { Icon, Sheet } from './ui';
 
 export default function WeeklyReview({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -58,6 +59,20 @@ export default function WeeklyReview({ open, onClose }: { open: boolean; onClose
           {targets && <span className="tiny muted">objectif {targets.p} g</span>}
         </div>
       </div>
+
+      {(() => {
+        const h = healthBetween(monday, sunday);
+        const kcal = h.reduce((a, b) => a + (b.kcal ?? 0), 0);
+        if (h.length === 0) return null;
+        return (
+          <div className="card row" style={{ background: 'var(--sky-tint)', boxShadow: 'none' }}>
+            <Icon name="flame" style={{ color: 'var(--sky-ink)' }} />
+            <span className="small" style={{ color: 'var(--sky-ink)', fontWeight: 600 }}>
+              {fmtNum(kcal)} kcal brûlées pendant tes activités cette semaine ({h.length} enregistrée{h.length > 1 ? 's' : ''} par ta montre)
+            </span>
+          </div>
+        );
+      })()}
 
       {records.length > 0 && (
         <div className="card col" style={{ gap: 6, background: 'var(--brand-tint)', boxShadow: 'none' }}>

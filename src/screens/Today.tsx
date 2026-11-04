@@ -7,6 +7,7 @@ import { estimateMinutes, exName } from '../lib/program';
 import { activeSession, extraFor, getProgram, planFor, sessionToday } from '../lib/workout';
 import { isDeloadWeek, sessions } from '../lib/coach';
 import { useSyncStatus } from '../lib/sync';
+import { getLink, healthForSession, healthLine, healthOn, runShortcut } from '../lib/health';
 import { HeroLeaves, Icon, LogoMark, Ring, mealVisual, showToast } from '../components/ui';
 import WeighInSheet from '../components/WeighIn';
 import WeeklyReview from '../components/WeeklyReview';
@@ -185,7 +186,25 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
           </div>
         )}
         {!plan && !active && <span className="small muted">{extra ? extra.title : 'Pas de séance prévue aujourd’hui : récupère bien.'}</span>}
-        {done?.data.endedAt && <span className="small muted">Bien joué. Pense à bien manger après la séance.</span>}
+        {done?.data.endedAt && (() => {
+          const h = healthForSession(done.id);
+          return h ? (
+            <div className="row small" style={{ gap: 8, background: 'var(--sky-tint)', color: 'var(--sky-ink)', padding: '10px 12px', borderRadius: 14, fontWeight: 600 }}>
+              <Icon name="timer" size={18} />
+              {h.source} : {healthLine(h)}
+            </div>
+          ) : (
+            <div className="row between" style={{ gap: 8 }}>
+              <span className="small muted">Bien joué. Pense à bien manger après la séance.</span>
+              {getLink() && (
+                <button className="chip press" onClick={runShortcut}>
+                  <Icon name="timer" size={16} />
+                  Montre
+                </button>
+              )}
+            </div>
+          );
+        })()}
         {(plan || active) && !done?.data.endedAt && (
           <button className="btn brand press" style={{ minHeight: 48 }} onClick={() => go('workout')}>
             <Icon name={active ? 'timer' : 'dumbbell'} size={20} />
@@ -194,6 +213,22 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         )}
         {extra && plan && <span className="small muted">Et aussi : {extra.title.toLowerCase()}</span>}
       </section>
+
+      {healthOn(today)
+        .filter((h) => !h.sessionId)
+        .map((h) => (
+          <section key={h.at} className="card row">
+            <span className="tile tint-sky">
+              <Icon name="flame" />
+            </span>
+            <div className="grow col" style={{ gap: 2 }}>
+              <span className="tiny muted" style={{ fontWeight: 500 }}>
+                Activité du jour · {h.source}
+              </span>
+              <span style={{ fontWeight: 700 }}>{healthLine(h)}</span>
+            </div>
+          </section>
+        ))}
 
       {/* Semaine */}
       {program && program.days.length > 0 && (

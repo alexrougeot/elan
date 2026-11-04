@@ -6,6 +6,7 @@ import { CATALOG, estimateMinutes, exName, platesFor, type Program, type Program
 import { bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
 import { activeSession, adjustRest, getProgram, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest } from '../lib/workout';
 import { haptic, keepScreenOn, unlockAudio } from '../lib/device';
+import { getLink, healthForSession, healthLine } from '../lib/health';
 import { HeroLeaves, Icon, Ring, Sheet, Stepper, muscleTint, showToast, useNow } from '../components/ui';
 
 export default function Workout({ go }: { go: (t: Tab) => void }) {
@@ -138,6 +139,11 @@ function Planner({ go }: { go: (t: Tab) => void }) {
                       <span className="small muted">
                         {shortDate(s.data.date)} · {min} min · {st.sets} séries · {fmtNum(st.volume)} kg soulevés
                       </span>
+                      {healthForSession(s.id) && (
+                        <span className="tiny" style={{ color: 'var(--sky-ink)', fontWeight: 600 }}>
+                          {healthForSession(s.id)!.source} : {healthLine(healthForSession(s.id)!)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {i < history.length - 1 && <div className="divider" />}
@@ -701,6 +707,11 @@ function FinishSheet({ sid, session, open, onClose }: { sid: string; session: Se
             </span>
           ))}
         </div>
+      )}
+      {getLink() && (
+        <p className="small muted" style={{ margin: 0 }}>
+          Pense à arrêter aussi l’entraînement sur ta montre : ses calories et ton cœur arriveront ensuite dans Élan.
+        </p>
       )}
       {left > 0 && (
         <p className="small muted" style={{ margin: 0 }}>

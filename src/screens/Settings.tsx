@@ -7,16 +7,17 @@ import { computeTargets, GOALS, kcalOf, mealTarget, type Goal, type Meal, type P
 import { CATALOG, defaultRest, exName, fullBodyProgram, upperLowerProgram, type Program, type ProgramDay } from '../lib/program';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../lib/push';
 import { isIOS, isStandalone } from '../lib/device';
+import { createLink, getLink, linkUrl, runShortcut, SHORTCUT_NAME } from '../lib/health';
 import { Icon, Sheet, showToast } from '../components/ui';
 
 export default function Settings({ open, onClose }: { open: boolean; onClose: () => void }) {
   useStoreVersion();
-  const [page, setPage] = useState<'main' | 'profile' | 'nutrition' | 'program'>('main');
+  const [page, setPage] = useState<'main' | 'profile' | 'nutrition' | 'program' | 'watch'>('main');
   useEffect(() => {
     if (open) setPage('main');
   }, [open]);
 
-  const titles = { main: 'Réglages', profile: 'Profil', nutrition: 'Objectifs et repas', program: 'Programme' };
+  const titles = { main: 'Réglages', profile: 'Profil', nutrition: 'Objectifs et repas', program: 'Programme', watch: 'Montre et Santé' };
   return (
     <Sheet
       open={open}
@@ -36,6 +37,7 @@ export default function Settings({ open, onClose }: { open: boolean; onClose: ()
       {page === 'profile' && <ProfilePage />}
       {page === 'nutrition' && <NutritionPage />}
       {page === 'program' && <ProgramPage />}
+      {page === 'watch' && <WatchPage />}
     </Sheet>
   );
 }
@@ -53,7 +55,7 @@ function Row({ icon, title, sub, onClick }: { icon: string; title: string; sub?:
   );
 }
 
-function MainPage({ go }: { go: (p: 'profile' | 'nutrition' | 'program') => void }) {
+function MainPage({ go }: { go: (p: 'profile' | 'nutrition' | 'program' | 'watch') => void }) {
   const profile = getData<Profile>('profile')!;
   const targets = getData<Targets>('targets');
   const program = getData<Program>('program');
@@ -102,6 +104,8 @@ function MainPage({ go }: { go: (p: 'profile' | 'nutrition' | 'program') => void
         <Row icon="fork" title="Objectifs et repas" sub={targets ? `${targets.kcal} kcal · ${targets.meals.length} repas · ${targets.mode === 'auto' ? 'ajustement auto' : 'manuel'}` : ''} onClick={() => go('nutrition')} />
         <div className="divider" />
         <Row icon="dumbbell" title="Programme" sub={program ? (program.days.length ? program.days.map((d) => WEEKDAYS[d.weekday].slice(0, 3).toLowerCase()).join(', ') + ` · ${program.days.length} séance${program.days.length > 1 ? 's' : ''}` : 'Aucune séance') : ''} onClick={() => go('program')} />
+        <div className="divider" />
+        <Row icon="timer" title="Montre et Santé" sub={getLink() ? 'Apple Watch ou Garmin reliée' : 'Récupère calories, durée et cœur'} onClick={() => go('watch')} />
       </div>
 
       <div className="card col" style={{ gap: 4, background: 'var(--card2)', boxShadow: 'none' }}>
@@ -639,6 +643,109 @@ function DayEditor({ program, day, onBack, onSave }: { program: Program; day: Pr
           );
         })}
       </Sheet>
+    </>
+  );
+}
+
+// ---------------- Montre et Santé ----------------
+function WatchPage() {
+  const link = getLink();
+  const [busy, setBusy] = useState(false);
+  const url = link ? linkUrl(link.token) : '';
+
+  async function make() {
+    setBusy(true);
+    try {
+      await createLink();
+      showToast('Ton lien est prêt');
+    } catch {
+      showToast('Impossible de créer le lien : vérifie ta connexion.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast('Adresse copiée');
+    } catch {
+      showToast('Copie impossible : sélectionne l’adresse à la main.');
+    }
+  }
+
+  const step = (n: number, body: React.ReactNode) => (
+    <div className="row" style={{ alignItems: 'flex-start', gap: 12 }}>
+      <span className="tile sm tint-brand" style={{ fontWeight: 700, fontSize: 14 }}>
+        {n}
+      </span>
+      <div className="grow small" style={{ lineHeight: 1.5, paddingTop: 7 }}>
+        {body}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <p className="small muted" style={{ margin: 0, lineHeight: 1.5 }}>
+        Ton Apple Watch et ta Garmin enregistrent tes séances dans l’app Santé de l’iPhone. Un raccourci iPhone lit les calories et le cœur de ta séance et les envoie à Élan, qui les range avec la séance du jour.
+      </p>
+
+      {!link ? (
+        <button className="btn brand press" onClick={make} disabled={busy}>
+          {busy ? 'Création…' : 'Créer mon lien personnel'}
+        </button>
+      ) : (
+        <div className="card col" style={{ gap: 10, background: 'var(--card2)', boxShadow: 'none' }}>
+          <span style={{ fontWeight: 700 }}>Ton adresse personnelle</span>
+          <code style={{ fontSize: 12, wordBreak: 'break-all', background: 'var(--card)', padding: 10, borderRadius: 10, userSelect: 'all' }}>{url}</code>
+          <span className="tiny muted">Garde-la pour toi : elle permet d’ajouter des données à ton compte.</span>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn small brand press grow" onClick={copy}>
+              Copier l’adresse
+            </button>
+            <button className="btn small ghost press" onClick={make} disabled={busy}>
+              Recréer
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="section-head">
+        <h2 className="h2">Créer le raccourci (une seule fois)</h2>
+      </div>
+      <div className="col" style={{ gap: 12 }}>
+        {step(1, <>Ouvre l’app <b>Raccourcis</b>, touche <b>+</b> et nomme le raccourci <b>{SHORTCUT_NAME}</b> (exactement).</>)}
+        {step(2, <>Ajoute l’action <b>Obtenir le contenu de l’URL</b> et colle ton adresse.</>)}
+        {step(3, <>Ajoute <b>Obtenir la valeur du dictionnaire</b>, avec la clé <b>minutes</b>.</>)}
+        {step(4, <>Ajoute <b>Rechercher des échantillons de santé</b> : type <b>Énergie active</b>, puis le filtre <b>Date de début</b> « est dans les derniers » <b>Valeur du dictionnaire</b> minutes. Retire la limite s’il y en a une.</>)}
+        {step(5, <>Ajoute <b>Calculer des statistiques</b> (tape « statistiques » dans la recherche) et choisis <b>Somme</b>.</>)}
+        {step(6, <>Ajoute de nouveau <b>Rechercher des échantillons de santé</b> : type <b>Fréquence cardiaque</b>, même filtre de date.</>)}
+        {step(7, <>Ajoute <b>Calculer des statistiques</b> sur ces échantillons, choisis <b>Moyenne</b>. Puis une deuxième fois avec <b>Maximum</b>.</>)}
+        {step(8, <>Ajoute enfin <b>Obtenir le contenu de l’URL</b> avec ton adresse. Touche la flèche : méthode <b>POST</b>, corps <b>JSON</b>, et ajoute quatre champs : <b>kcal</b> = la Somme, <b>fcMoy</b> = la Moyenne, <b>fcMax</b> = le Maximum, <b>source</b> = Apple Watch (ou Garmin).</>)}
+        {step(9, <>Facultatif : ajoute <b>Afficher la notification</b> avec le <b>Contenu de l’URL</b>, pour voir la confirmation d’Élan.</>)}
+      </div>
+
+      <div className="section-head">
+        <h2 className="h2">Le lancer tout seul</h2>
+      </div>
+      <div className="card col" style={{ gap: 10, background: 'var(--card2)', boxShadow: 'none' }}>
+        <span className="small" style={{ lineHeight: 1.5 }}>
+          <b>Apple Watch :</b> dans Raccourcis, onglet <b>Automatisation</b>, crée une automatisation <b>Entraînement Apple Watch</b>, choisis <b>Se termine</b>, puis <b>Exécuter immédiatement</b> et le raccourci <b>{SHORTCUT_NAME}</b>. À chaque fin d’entraînement sur ta montre, Élan reçoit tes données.
+        </span>
+        <span className="small" style={{ lineHeight: 1.5 }}>
+          <b>Garmin :</b> dans Garmin Connect, va dans les réglages, <b>Applications connectées</b>, <b>Santé Apple</b>, et autorise le partage des activités. Après la synchronisation de ta montre, touche <b>Récupérer depuis ma montre</b> sur l’accueil d’Élan.
+        </span>
+      </div>
+
+      {link && (
+        <button className="btn ghost press" onClick={runShortcut}>
+          Tester le raccourci maintenant
+        </button>
+      )}
+      <p className="tiny muted" style={{ margin: 0, lineHeight: 1.5 }}>
+        Au premier lancement, l’iPhone te demande d’autoriser Raccourcis à lire Santé : accepte l’énergie active et la fréquence cardiaque. Ta femme crée son propre lien depuis son compte.
+      </p>
     </>
   );
 }
