@@ -197,7 +197,11 @@ export function RunView({ id, fresh }: { id: string; fresh?: boolean }) {
       ) : (
         <div className="card row small muted" style={{ background: 'var(--card2)', boxShadow: 'none', gap: 8 }}>
           <Icon name="info" size={18} />
-          Pas de parcours pour cette course : il arrive avec les courses récupérées depuis Santé.
+          {a.source === 'Garmin'
+            ? 'Garmin ne partage pas le tracé GPS avec Santé : tu as les chiffres de ta course, mais pas la carte.'
+            : a.source
+              ? 'Pas de tracé GPS pour cette course (course sur tapis, ou GPS coupé).'
+              : 'Pas de parcours pour cette course : il arrive avec les courses récupérées depuis ta montre.'}
         </div>
       )}
 
