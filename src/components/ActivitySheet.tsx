@@ -57,7 +57,7 @@ export default function ActivitySheet({ open, onClose, initial, duoDefault }: { 
     haptic();
     const { at: _at, ...rest } = draft;
     await saveActivity(rest);
-    showToast(`${def.label} enregistré${type === 'course' || type === 'natation' || type === 'marche' ? 'e' : ''}${bonus && !yesterday ? ` : +${bonus} kcal à manger aujourd’hui` : ''}`);
+    showToast(`${def.label} enregistré${type === 'course' || type === 'natation' || type === 'marche' ? 'e' : ''}${bonus && !yesterday ? ` : objectif du jour +${bonus} kcal` : ''}`);
     onClose();
   }
 
@@ -125,7 +125,9 @@ export default function ActivitySheet({ open, onClose, initial, duoDefault }: { 
         </span>
         {bonus > 0 && (
           <span className="small">
-            Pour ne pas freiner ta prise de masse, ajoute environ {bonus} kcal {yesterday ? 'aujourd’hui' : 'dans la journée'} : {bonusFood(bonus)}.
+            {yesterday
+              ? `Pour ne pas freiner ta prise de masse, ajoute environ ${bonus} kcal aujourd’hui : ${bonusFood(bonus)}.`
+              : `Élan ajoute ${bonus} kcal à ton objectif du jour (la moitié de ta dépense, l’autre est déjà comptée). Si ta montre l’a enregistré, c’est sa mesure qui compte. Par exemple : ${bonusFood(bonus)}.`}
           </span>
         )}
       </div>

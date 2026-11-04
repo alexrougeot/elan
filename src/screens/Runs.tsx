@@ -216,7 +216,7 @@ export function RunView({ id, fresh }: { id: string; fresh?: boolean }) {
 
       {bonus > 0 && (
         <div className="card small" style={{ color: 'var(--orange-ink)', background: 'var(--orange-tint)', boxShadow: 'none', lineHeight: 1.5 }}>
-          Ajoute environ {bonus} kcal aujourd’hui pour ne pas freiner ta prise de masse : {bonusFood(bonus)}.
+          Élan a ajouté {bonus} kcal à ton objectif du jour pour ne pas freiner ta prise de masse. Par exemple : {bonusFood(bonus)}.
         </div>
       )}
 

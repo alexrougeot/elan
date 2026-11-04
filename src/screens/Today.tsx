@@ -10,7 +10,7 @@ import { isDeloadWeek, sessions } from '../lib/coach';
 import { useSyncStatus } from '../lib/sync';
 import { getLink, healthForSession, healthLine, healthOn, runShortcut } from '../lib/health';
 import { addWater, GLASS, WATER_REMINDERS, waterGoal, waterOn } from '../lib/water';
-import { ACTIVITY, activities, activitiesOn, activityKcal, activityLine, askCircuit, fuelBonus } from '../lib/activity';
+import { ACTIVITY, activities, activitiesOn, activityKcal, activityLine, askCircuit, dayBonus } from '../lib/activity';
 import ActivitySheet, { bonusFood } from '../components/ActivitySheet';
 import { fetchRun, openRun } from './Runs';
 import { haptic } from '../lib/device';
@@ -108,7 +108,10 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   const goalW = profile.goalWeight;
   const progress = weight !== undefined && goalW !== start ? Math.max(0, Math.min(1, (weight - start) / (goalW - start))) : 0;
   const deload = program ? isDeloadWeek(program) : false;
-  const left = targets ? targets.kcal - totals.k : 0;
+  // les entraînements en plus (montre ou notés) augmentent l'objectif du jour
+  const extraBurn = dayBonus(today, profile.goal, weight);
+  const dayTargets = targets ? { ...targets, kcal: targets.kcal + extraBurn.bonus, g: targets.g + Math.round(extraBurn.bonus / 4) } : undefined;
+  const left = dayTargets ? dayTargets.kcal - totals.k : 0;
 
   return (
     <main className="screen">
@@ -135,7 +138,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
       )}
 
       {/* Calories : la carte héros */}
-      {targets && (
+      {dayTargets && (
         <button className="hero press col" style={{ border: 'none', textAlign: 'left', gap: 14 }} onClick={() => go('nutrition')}>
           <HeroLeaves />
           <div className="row between">
@@ -143,18 +146,18 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
               <Icon name="flame" size={15} />
               Calories du jour
             </span>
-            <span className="small on-hero-2">{Math.round((totals.k / targets.kcal) * 100)} %</span>
+            <span className="small on-hero-2">{Math.round((totals.k / dayTargets.kcal) * 100)} %</span>
           </div>
           <div className="row" style={{ gap: 18 }}>
-            <Ring value={totals.k / targets.kcal} size={116} stroke={13} color="#BEF264" track="rgba(255,255,255,0.18)" label={`${fmtNum(Math.abs(left))} kilocalories ${left >= 0 ? 'restantes' : 'en trop'}`}>
+            <Ring value={totals.k / dayTargets.kcal} size={116} stroke={13} color="#BEF264" track="rgba(255,255,255,0.18)" label={`${fmtNum(Math.abs(left))} kilocalories ${left >= 0 ? 'restantes' : 'en trop'}`}>
               <span style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-0.02em', color: '#fff' }}>{fmtNum(Math.abs(left))}</span>
               <span className="tiny on-hero-2">{left >= 0 ? 'kcal restantes' : 'kcal en trop'}</span>
             </Ring>
             <div className="grow col" style={{ gap: 11 }}>
               {[
-                ['Protéines', totals.p, targets.p, '#A7F3D0'],
-                ['Glucides', totals.g, targets.g, '#BEF264'],
-                ['Lipides', totals.l, targets.l, '#FCD34D'],
+                ['Protéines', totals.p, dayTargets.p, '#A7F3D0'],
+                ['Glucides', totals.g, dayTargets.g, '#BEF264'],
+                ['Lipides', totals.l, dayTargets.l, '#FCD34D'],
               ].map(([l, v, t, c]) => (
                 <div key={l as string} className="col" style={{ gap: 5 }}>
                   <div className="row between small">
@@ -170,6 +173,11 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
               ))}
             </div>
           </div>
+          {extraBurn.bonus > 0 && (
+            <span className="hero-chip" style={{ alignSelf: 'flex-start' }}>
+              <Icon name="flame" size={15} />+{extraBurn.bonus} kcal pour ton entraînement ({extraBurn.fromWatch ? 'mesuré par ta montre' : 'estimé'})
+            </span>
+          )}
         </button>
       )}
 
@@ -294,12 +302,11 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         {extra && plan && <span className="small muted">Et aussi : {extra.title.toLowerCase()}</span>}
       </section>
 
-      {todayActs.map((a) => {
-        const watch = healthOn(today)
-          .filter((h) => !h.sessionId && h.kcal)
-          .reduce((x, h) => x + (h.kcal ?? 0), 0);
-        const kcal = watch || activityKcal(a.data, weight);
-        const bonus = fuelBonus(kcal, profile.goal);
+      {todayActs.map((a, ai) => {
+        const unmeasured = todayActs.filter((x) => !x.data.kcal).length;
+        const fromWatch = !!a.data.kcal || (!a.data.kcal && unmeasured === 1 && extraBurn.watch > 0);
+        const kcal = a.data.kcal ?? (fromWatch ? extraBurn.watch : activityKcal(a.data, weight));
+        const bonus = ai === 0 ? extraBurn.bonus : 0;
         return (
           <section
             key={a.id}
@@ -319,11 +326,14 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
                 </span>
                 <span style={{ fontWeight: 700 }}>{activityLine(a.data)}</span>
               </div>
-              <span className="badge gray">{kcal} kcal</span>
+              <span className="col" style={{ alignItems: 'flex-end', gap: 1 }}>
+                <span className="badge gray">{kcal} kcal</span>
+                <span className="tiny muted">{fromWatch ? 'montre' : 'estimé'}</span>
+              </span>
             </div>
-            {bonus > 0 && (
-              <span className="small" style={{ color: 'var(--orange-ink)', background: 'var(--orange-tint)', padding: '10px 12px', borderRadius: 14 }}>
-                Ajoute environ {bonus} kcal aujourd’hui pour ne pas freiner ta prise de masse : {bonusFood(bonus)}.
+            {bonus > 0 && dayTargets && (
+              <span className="small" style={{ color: 'var(--orange-ink)', background: 'var(--orange-tint)', padding: '10px 12px', borderRadius: 14, lineHeight: 1.45 }}>
+                Ton objectif du jour passe à {fmtNum(dayTargets.kcal)} kcal (+{bonus} en glucides), pour ne pas freiner ta prise de masse. Par exemple : {bonusFood(bonus)}.
               </span>
             )}
           </section>
@@ -342,6 +352,11 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
                 Activité du jour · {h.source}
               </span>
               <span style={{ fontWeight: 700 }}>{healthLine(h)}</span>
+              {todayActs.length === 0 && extraBurn.bonus > 0 && (
+                <span className="small" style={{ color: 'var(--orange-ink)' }}>
+                  +{extraBurn.bonus} kcal ajoutées à ton objectif du jour
+                </span>
+              )}
             </div>
           </section>
         ))}

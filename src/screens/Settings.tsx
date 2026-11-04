@@ -172,6 +172,9 @@ function MainPage({ go }: { go: (p: 'profile' | 'nutrition' | 'program' | 'watch
         <button className="btn ghost press" onClick={logout}>
           Se déconnecter
         </button>
+        <span className="tiny muted" style={{ textAlign: 'center' }}>
+          Version du {new Date(__BUILD__).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+        </span>
       </div>
     </>
   );

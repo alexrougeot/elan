@@ -4,6 +4,7 @@ import { allOf, getData, putDoc, removeDoc, uid } from './store';
 import { dayKey } from './dates';
 import type { Profile } from './nutrition';
 import type { CircuitPlan } from './conditioning';
+import { healthOn } from './health';
 
 export type ActivityType = 'course' | 'circuit' | 'cours' | 'velo' | 'natation' | 'marche' | 'autre';
 export type Activity = {
@@ -98,6 +99,28 @@ export function activityKcal(a: Activity, kg = getData<Profile>('profile')?.weig
 export function fuelBonus(kcal: number, goal: Profile['goal'] = 'masse') {
   if (goal !== 'masse' || kcal < 250) return 0;
   return Math.round((kcal * 0.5) / 50) * 50;
+}
+
+/**
+ * Dépense des activités en plus du programme sur une journée.
+ * La montre a le dernier mot : si elle a mesuré un entraînement, on prend sa valeur plutôt que l'estimation.
+ */
+export function dayBurn(date = dayKey(), kg?: number) {
+  const acts = activitiesOn(date).map((d) => d.data);
+  const measured = acts.filter((a) => a.kcal).reduce((x, a) => x + (a.kcal ?? 0), 0);
+  const estimated = acts.filter((a) => !a.kcal).reduce((x, a) => x + activityKcal(a, kg), 0);
+  const watch = healthOn(date)
+    .filter((h) => !h.sessionId && h.kcal)
+    .reduce((x, h) => x + (h.kcal ?? 0), 0);
+  const burn = measured + Math.max(watch, estimated);
+  const fromWatch = measured > 0 || (watch > 0 && watch >= estimated);
+  return { burn, fromWatch, watch, estimated, measured };
+}
+
+/** Objectif du jour : la base + la moitié de ce que les activités en plus ont brûlé (en glucides) */
+export function dayBonus(date = dayKey(), goal: Profile['goal'] = 'masse', kg?: number) {
+  const b = dayBurn(date, kg);
+  return { ...b, bonus: fuelBonus(b.burn, goal) };
 }
 
 /** Allure en secondes par km */

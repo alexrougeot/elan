@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { allOf, getData, getDoc, putDoc, removeDoc, uid, useStoreVersion } from '../lib/store';
 import { addDays, dayKey, fmtNum, hhmm, longDate } from '../lib/dates';
-import { entryMacros, foodsOn, getTargets, mealTarget, sum, totalsOn, type FoodEntry, type Macros } from '../lib/nutrition';
+import { currentWeight, entryMacros, foodsOn, getTargets, mealTarget, sum, totalsOn, type FoodEntry, type Macros, type Profile } from '../lib/nutrition';
+import { dayBonus } from '../lib/activity';
 import { loadCiqual, offProduct, offSearch, rememberFood, searchCiqual, searchMine, myFoods, type FoodItem, type MyFood } from '../lib/foods';
 import { currentSubscription, enablePush, pushSupported } from '../lib/push';
 import { haptic, isIOS, isStandalone, useOnline } from '../lib/device';
@@ -31,7 +32,10 @@ export default function Nutrition() {
   }, []);
 
   if (!targets) return null;
-  const left = targets.kcal - totals.k;
+  const profile = getData<Profile>('profile');
+  const extra = dayBonus(date, profile?.goal ?? 'masse', currentWeight(profile));
+  const dayT = { ...targets, kcal: targets.kcal + extra.bonus, g: targets.g + Math.round(extra.bonus / 4) };
+  const left = dayT.kcal - totals.k;
 
   async function copyYesterday(meal: number) {
     const y = foodsOn(addDays(date, -1)).filter((f) => f.data.meal === meal);
@@ -88,13 +92,18 @@ export default function Nutrition() {
       <section className="hero col" style={{ gap: 16 }}>
         <HeroLeaves />
         <div className="row" style={{ gap: 18 }}>
-          <Ring value={totals.k / targets.kcal} size={108} stroke={13} color={left < -150 ? '#FCD34D' : '#BEF264'} track="rgba(255,255,255,0.18)" label={`${fmtNum(Math.abs(left))} kilocalories ${left >= 0 ? 'restantes' : 'en trop'}`}>
+          <Ring value={totals.k / dayT.kcal} size={108} stroke={13} color={left < -150 ? '#FCD34D' : '#BEF264'} track="rgba(255,255,255,0.18)" label={`${fmtNum(Math.abs(left))} kilocalories ${left >= 0 ? 'restantes' : 'en trop'}`}>
             <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: '#fff' }}>{fmtNum(Math.abs(left))}</span>
             <span className="tiny on-hero-2">{left >= 0 ? 'kcal restantes' : 'kcal en trop'}</span>
           </Ring>
           <div className="col" style={{ gap: 4 }}>
             <span style={{ fontSize: 18, fontWeight: 700 }}>{fmtNum(totals.k)} kcal mangées</span>
-            <span className="small on-hero-2">Objectif : {fmtNum(targets.kcal)} kcal</span>
+            <span className="small on-hero-2">Objectif : {fmtNum(dayT.kcal)} kcal</span>
+            {extra.bonus > 0 && (
+              <span className="hero-chip" style={{ alignSelf: 'flex-start', marginTop: 4 }}>
+                <Icon name="flame" size={14} />+{extra.bonus} kcal d’entraînement ({extra.fromWatch ? 'montre' : 'estimé'})
+              </span>
+            )}
             {targets.history.filter((h) => !h.undone).slice(-1).map((h) => (
               <span key={h.date} className="hero-chip" style={{ alignSelf: 'flex-start', marginTop: 4 }}>
                 Ajusté le {new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} : {h.delta > 0 ? '+' : ''}
@@ -105,9 +114,9 @@ export default function Nutrition() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
           {[
-            ['Protéines', totals.p, targets.p, '#A7F3D0'],
-            ['Glucides', totals.g, targets.g, '#BEF264'],
-            ['Lipides', totals.l, targets.l, '#FCD34D'],
+            ['Protéines', totals.p, dayT.p, '#A7F3D0'],
+            ['Glucides', totals.g, dayT.g, '#BEF264'],
+            ['Lipides', totals.l, dayT.l, '#FCD34D'],
           ].map(([l, v, t, c]) => (
             <div key={l as string} className="col" style={{ gap: 4 }}>
               <span className="tiny on-hero-2">{l as string}</span>

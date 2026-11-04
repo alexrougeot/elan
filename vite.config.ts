@@ -5,6 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 // L'app est publiée sur GitHub Pages à l'adresse https://alexrougeot.github.io/elan/
 export default defineConfig({
   base: '/elan/',
+  define: { __BUILD__: JSON.stringify(new Date().toISOString()) },
   plugins: [
     react(),
     VitePWA({
