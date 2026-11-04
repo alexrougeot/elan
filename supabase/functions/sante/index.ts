@@ -66,8 +66,10 @@ function kindOf(name: string): 'course' | 'marche' | 'velo' | 'natation' | 'musc
   if (/walk|marche|hik|randonn/.test(n)) return 'marche';
   if (/cycl|bike|vélo|velo/.test(n)) return 'velo';
   if (/swim|natation|nage/.test(n)) return 'natation';
-  if (/strength|renforcement|musculation|weight|haltéro|core/.test(n)) return 'muscu';
-  if (/hiit|interval|fraction|cross|functional|fonctionnel|mixed|mixte|row|rameur|elliptic|ski|cardio|kickbox|boxe/.test(n)) return 'cardio';
+  // « Entraînement de force fonctionnel », HIIT, cross training… : séances type Hyrox
+  if (/hiit|interval|fraction|cross|crois|functional|fonctionnel|mixed|mixte|row|rameur|elliptic|ski|cardio|kickbox|boxe/.test(n)) return 'cardio';
+  // « Entraînement de force traditionnel », renforcement musculaire… : séances de muscu
+  if (/strength|force|renfo|musculation|weight|haltéro|core|gainage/.test(n)) return 'muscu';
   return 'autre';
 }
 
@@ -99,9 +101,17 @@ function routeOf(w: HaeWorkout, start: Date) {
   let next = 1000;
   let lastT = 0;
   let gain = 0;
+  let ref = NaN; // dénivelé : on ignore les petites variations du GPS (moins de 3 m)
   for (let i = 1; i < pts.length; i++) {
     const d = haversine(pts[i - 1], pts[i]);
-    if (!Number.isNaN(pts[i][3]) && !Number.isNaN(pts[i - 1][3])) gain += Math.max(0, pts[i][3] - pts[i - 1][3]);
+    const alt = pts[i][3];
+    if (!Number.isNaN(alt)) {
+      if (Number.isNaN(ref)) ref = alt;
+      else if (alt > ref + 3) {
+        gain += alt - ref;
+        ref = alt;
+      } else if (alt < ref - 3) ref = alt;
+    }
     const before = dist;
     dist += d;
     while (dist >= next && !Number.isNaN(pts[i][2])) {
@@ -132,6 +142,25 @@ function heartOf(w: HaeWorkout) {
   return { avg: avg !== undefined ? Math.round(avg) : undefined, max: max !== undefined ? Math.round(max) : undefined };
 }
 
+/** Nom de l'appareil : la source peut être un texte, un objet ou une liste */
+function sourceOf(w: HaeWorkout): string {
+  const pickName = (v: unknown): string | undefined => {
+    if (!v) return undefined;
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) return pickName(v[0]);
+    if (typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      return pickName(o.name ?? o.sourceName ?? o.deviceName ?? o.productType ?? o.device);
+    }
+    return undefined;
+  };
+  const raw = pickName(w.source) ?? pickName(w.sourceName) ?? pickName(w.device) ?? 'Montre';
+  const s = raw.trim();
+  if (/watch/i.test(s)) return 'Apple Watch';
+  if (/garmin|forerunner|fenix|venu|instinct|epix/i.test(s)) return 'Garmin';
+  return s.slice(0, 40) || 'Montre';
+}
+
 async function importWorkouts(userId: string, workouts: HaeWorkout[]) {
   let imported = 0;
   const lines: string[] = [];
@@ -147,7 +176,7 @@ async function importWorkouts(userId: string, workouts: HaeWorkout[]) {
     const { route, splits, gain, dist } = routeOf(w, start);
     const distance = km(w.distance) ?? dist;
     const elev = qty(w.elevationUp) ?? num(w.elevation?.ascent) ?? gain;
-    const source = String(w.source ?? w.sourceName ?? 'Montre').slice(0, 40);
+    const source = sourceOf(w);
     const date = parisDate(start);
     const now = new Date().toISOString();
     const extId = String(w.id ?? `${start.getTime()}-${name}`).replace(/[^\w-]/g, '').slice(0, 60);
@@ -248,10 +277,28 @@ Deno.serve(async (req) => {
     const userId = link.user_id as string;
 
     // Health Auto Export : une liste d'entraînements
-    const workouts = (body.data as { workouts?: unknown[] } | undefined)?.workouts ?? body.workouts;
+    const dataObj = body.data && typeof body.data === 'object' ? (body.data as Record<string, unknown>) : undefined;
+    const workouts = dataObj?.workouts ?? body.workouts;
+    console.log(
+      'reçu',
+      JSON.stringify({
+        method: req.method,
+        ua: (req.headers.get('user-agent') ?? '').slice(0, 60),
+        keys: Object.keys(body).slice(0, 12),
+        dataKeys: dataObj ? Object.keys(dataObj) : null,
+        workouts: Array.isArray(workouts) ? workouts.length : null,
+        names: Array.isArray(workouts) ? (workouts as HaeWorkout[]).slice(0, 8).map((w) => `${w?.name} ${String(w?.start ?? '').slice(0, 10)}`) : null,
+        first: Array.isArray(workouts) && workouts[0] ? Object.keys(workouts[0] as object).join(',') : null,
+        source: Array.isArray(workouts) && workouts[0] ? JSON.stringify((workouts[0] as HaeWorkout).source ?? null).slice(0, 160) : null,
+        vals: dataObj ? null : Object.fromEntries(Object.entries(body).filter(([k]) => k !== 't' && k !== 'token').map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 24) : typeof v === 'number' ? v : typeof v])),
+      })
+    );
     if (req.method === 'POST' && Array.isArray(workouts)) {
       const { imported, lines } = await importWorkouts(userId, workouts as HaeWorkout[]);
-      return json({ ok: true, imported, message: imported ? `Élan : ${lines.join(', ')}` : 'Rien de nouveau.' });
+      return json({ ok: true, imported, message: imported ? `Élan : ${lines.join(', ')}` : 'Élan : aucun entraînement dans cette période.' });
+    }
+    if (req.method === 'POST' && dataObj) {
+      return json({ ok: false, message: 'Élan attend des entraînements : dans Health Auto Export, choisis le type de données Workouts.' }, 422);
     }
 
     // Séance Élan des 8 dernières heures, s'il y en a une
@@ -273,11 +320,26 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET') return json({ ok: true, minutes, seance: session?.data.title ?? null });
 
-    const kcal = num(body.kcal ?? body.calories ?? body.energie);
-    const hrAvg = num(body.fcMoy ?? body.fcmoy ?? body.hrAvg);
-    const hrMax = num(body.fcMax ?? body.fcmax ?? body.hrMax);
-    const dur = num(body.duree ?? body.minutes) ?? sessionMinutes ?? minutes - 5;
-    if (kcal === undefined && hrAvg === undefined) return json({ ok: false, message: 'Aucune donnée reçue de Santé.' }, 400);
+    // champs du raccourci, sans tenir compte des majuscules, espaces et accents
+    const flat = (k: string) => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const fields = Object.fromEntries(Object.entries(body).map(([k, v]) => [flat(k), v]));
+    const pick = (...names: string[]) => num(names.map((n) => fields[n]).find((v) => v !== undefined && v !== ''));
+    const kcal = pick('kcal', 'calories', 'energie', 'energieactive', 'somme');
+    const hrAvg = pick('fcmoy', 'fcmoyenne', 'hravg', 'moyenne', 'coeur');
+    const hrMax = pick('fcmax', 'hrmax', 'maximum');
+    const dur = pick('duree', 'minutes') ?? sessionMinutes ?? minutes - 5;
+    if (kcal === undefined && hrAvg === undefined) {
+      const recu = Object.keys(body).filter((k) => k !== 't' && k !== 'token');
+      return json(
+        {
+          ok: false,
+          message: recu.length
+            ? `Élan a reçu ${recu.join(', ')} mais sans valeur. Vérifie que Raccourcis a le droit de lire Santé (Réglages › Santé › Accès aux données).`
+            : 'Élan n’a reçu aucune donnée : vérifie le corps de la requête (JSON) dans la dernière action du raccourci.',
+        },
+        400
+      );
+    }
 
     const now = new Date();
     const id = session ? 'health:' + session.id.replace('session:', '') : `health:${parisDate(now)}:${now.getTime()}`;
