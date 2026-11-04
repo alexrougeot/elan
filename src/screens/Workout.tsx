@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tab } from '../App';
 import { getData, getDoc, putDoc, removeDoc, useStoreVersion } from '../lib/store';
-import { addDays, dayKey, fmtNum, fmtWeight, shortDate, WEEKDAYS } from '../lib/dates';
+import { addDays, dayKey, fmtNum, fmtWeight, longDate, shortDate, WEEKDAYS } from '../lib/dates';
 import { CATALOG, defaultRest, estimateMinutes, exName, platesFor, type Circuit, type Program, type ProgramDay } from '../lib/program';
 import { autoAdjust, bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
 import { activeSession, adjustRest, getProgram, groupMembers, nextPending, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest, warmupsFor, type Readiness } from '../lib/workout';
@@ -37,6 +37,7 @@ function Planner({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayI
   const [circuitOpen, setCircuitOpen] = useState(() => takeCircuitAsk());
   const [actOpen, setActOpen] = useState(false);
   const [skip, setSkip] = useState(false);
+  const [past, setPast] = useState<string | null>(null);
   const acts = activities().slice(0, 12);
   const feed = [
     ...history.map((s) => ({ at: s.data.startedAt, s, a: undefined })),
@@ -230,7 +231,7 @@ function Planner({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayI
               const min = s.data.endedAt ? Math.round((new Date(s.data.endedAt).getTime() - new Date(s.data.startedAt).getTime()) / 60000) : 0;
               return (
                 <div key={s.id}>
-                  <div className="list-row">
+                  <div className="list-row press" role="button" tabIndex={0} onClick={() => setPast(s.id)}>
                     <span className="tile sm tint-brand">
                       <Icon name="check" size={18} stroke={2.6} />
                     </span>
@@ -257,6 +258,7 @@ function Planner({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayI
       <CircuitStartSheet open={circuitOpen} onClose={() => setCircuitOpen(false)} />
       <ActivitySheet open={actOpen} onClose={() => setActOpen(false)} />
       <SkipSheet open={skip} onClose={() => setSkip(false)} />
+      <PastSessionSheet id={past} onClose={() => setPast(null)} />
     </main>
   );
 }
@@ -1283,6 +1285,73 @@ function ReadinessSheet({ day, onClose, onPick }: { day: ProgramDay | null; onCl
         <Icon name="dumbbell" />
         Commencer
       </button>
+    </Sheet>
+  );
+}
+
+// ---------------- Une séance passée : détail et suppression ----------------
+function PastSessionSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const doc = id ? getDoc<Session>(id) : undefined;
+  const s = doc?.data;
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => setConfirm(false), [id]);
+  if (!s || !id) return <Sheet open={false} onClose={onClose} title="">{null}</Sheet>;
+  const st = sessionStats(s);
+
+  async function drop() {
+    if (!id || !s) return;
+    const saved = s;
+    const healthId = 'health:' + id.replace('session:', '');
+    const health = getDoc(healthId);
+    await removeDoc(id);
+    if (health) await removeDoc(healthId);
+    onClose();
+    showToast('Séance supprimée', {
+      label: 'Annuler',
+      run: () => {
+        void putDoc(id, 'session', saved);
+        if (health) void putDoc(healthId, 'health', health.data);
+      },
+    });
+  }
+
+  return (
+    <Sheet open={!!id} onClose={onClose} title={s.title}>
+      <span className="small muted">
+        {longDate(s.date)} · {st.sets} séries · {fmtNum(st.volume)} kg soulevés
+      </span>
+      <div className="card tight" style={{ background: 'var(--card2)', boxShadow: 'none' }}>
+        {s.exercises
+          .filter((e) => e.sets.some((x) => x.done))
+          .map((e, i, arr) => (
+            <div key={i}>
+              <div className="list-row">
+                <span className="grow" style={{ fontWeight: 600 }}>
+                  {exName(e.key)}
+                </span>
+                <span className="small muted">
+                  {e.planned.circuit
+                    ? `${e.sets.filter((x) => x.done).length} tours`
+                    : e.sets
+                        .filter((x) => x.done)
+                        .map((x) => (x.w ? `${fmtWeight(x.w)}×${x.r}` : `${x.r}`))
+                        .join(' · ')}
+                </span>
+              </div>
+              {i < arr.length - 1 && <div className="divider" />}
+            </div>
+          ))}
+      </div>
+      {!confirm ? (
+        <button className="btn ghost press" onClick={() => setConfirm(true)}>
+          <Icon name="trash" size={18} />
+          Supprimer cette séance
+        </button>
+      ) : (
+        <button className="btn danger press" onClick={drop}>
+          Oui, la supprimer (le coach l’oubliera)
+        </button>
+      )}
     </Sheet>
   );
 }
