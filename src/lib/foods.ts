@@ -1,6 +1,6 @@
 // Recherche d'aliments : table Ciqual (hors ligne) et Open Food Facts (en ligne).
 import type { Macros } from './nutrition';
-import { allOf, getDoc, putDoc } from './store';
+import { allOf, getDoc, putDoc, removeDoc } from './store';
 
 export type FoodItem = {
   name: string;
@@ -11,6 +11,8 @@ export type FoodItem = {
   ref: string;
   image?: string;
   serving?: number;
+  /** aliment perso décrit à l'unité : « 1 œuf = 100 g » */
+  unit?: { one: string; many: string; grams: number };
 };
 
 type CiqualRow = [number, string, string, number, number, number, number];
@@ -163,7 +165,14 @@ export async function offSearch(q: string): Promise<FoodItem[]> {
 }
 
 // ---- Mes aliments (scannés, créés, déjà utilisés) ----
-export type MyFood = FoodItem & { lastGrams?: number; lastPortion?: { one: string; count: number }; usedAt?: string; count?: number };
+export type MyFood = FoodItem & {
+  lastGrams?: number;
+  lastPortion?: { one: string; count: number };
+  usedAt?: string;
+  count?: number;
+  /** poids d'unité personnalisés : { banane: 130 } */
+  units?: Record<string, number>;
+};
 
 export function myFoods() {
   return allOf<MyFood>('myfood')
@@ -182,6 +191,24 @@ export async function rememberFood(item: FoodItem, grams?: number, portion?: { o
     usedAt: new Date().toISOString(),
     count: (prev?.count ?? 0) + (grams ? 1 : 0),
   });
+}
+
+/** Change le poids d'une unité pour cet aliment (« chez moi, 1 banane = 130 g ») */
+export async function setUnitWeight(item: FoodItem, one: string, grams: number) {
+  const id = 'myfood:' + item.ref;
+  const prev = getDoc<MyFood>(id)?.data;
+  await putDoc<MyFood>(id, 'myfood', { ...item, ...prev, units: { ...(prev?.units ?? {}), [one]: grams }, usedAt: prev?.usedAt ?? new Date().toISOString() });
+}
+
+export function isMine(ref: string) {
+  return !!getDoc('myfood:' + ref);
+}
+
+export async function forgetFood(ref: string) {
+  const id = 'myfood:' + ref;
+  const prev = getDoc<MyFood>(id)?.data;
+  await removeDoc(id);
+  return prev;
 }
 
 export function searchMine(q: string) {

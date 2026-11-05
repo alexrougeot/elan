@@ -94,13 +94,32 @@ const RULES: Rule[] = [
   { test: starts('soupe', 'potage', 'veloute'), portions: [P('bol', 'bols', 250)] },
 ];
 
-export function portionsFor(name: string, serving?: number): Portion[] {
+/**
+ * Unités proposées pour un aliment.
+ * `unit` : l'unité définie par l'utilisateur (aliment perso), toujours en premier.
+ * `custom` : les poids d'unité modifiés par l'utilisateur (« chez moi, 1 banane = 130 g »).
+ */
+export function portionsFor(name: string, serving?: number, unit?: Portion, custom?: Record<string, number>): Portion[] {
   const n = norm(name).replace(/,/g, ' ');
   const out: Portion[] = [];
-  if (serving && serving > 0) out.push(P('portion', 'portions', Math.round(serving)));
+  if (unit && unit.grams > 0) out.push(unit);
+  if (serving && serving > 0 && !(unit && Math.round(unit.grams) === Math.round(serving))) out.push(P('portion', 'portions', Math.round(serving)));
   const rule = RULES.find((r) => r.test(n));
   if (rule) for (const p of rule.portions) if (!out.some((o) => o.one === p.one)) out.push(p);
-  return out;
+  return out.map((p) => (custom?.[p.one] ? { ...p, grams: custom[p.one] } : p));
+}
+
+/** Pluriel simple pour une unité tapée par l'utilisateur */
+export function plural(one: string) {
+  const w = one.trim();
+  if (!w || /[sxz]$/i.test(w)) return w;
+  const [first, ...rest] = w.split(' ');
+  return [first + (/(au|eu)$/i.test(first) ? 'x' : 's'), ...rest].join(' ');
+}
+
+/** Unité devinée d'après le nom (« Œuf plat » → œuf) */
+export function guessUnit(name: string) {
+  return portionsFor(name)[0]?.one ?? 'portion';
 }
 
 export function countText(count: number, p: Portion) {

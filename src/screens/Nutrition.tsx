@@ -3,10 +3,10 @@ import { allOf, getData, getDoc, putDoc, removeDoc, uid, useStoreVersion } from 
 import { addDays, dayKey, fmtNum, hhmm, longDate } from '../lib/dates';
 import { currentWeight, entryMacros, foodsOn, getTargets, mealTarget, sum, totalsOn, type FoodEntry, type Macros, type Profile } from '../lib/nutrition';
 import { dayBonus } from '../lib/activity';
-import { loadCiqual, offProduct, offSearch, rememberFood, searchCiqual, searchMine, myFoods, type FoodItem, type MyFood } from '../lib/foods';
+import { forgetFood, isMine, loadCiqual, offProduct, offSearch, rememberFood, searchCiqual, searchMine, myFoods, setUnitWeight, type FoodItem, type MyFood } from '../lib/foods';
 import { currentSubscription, enablePush, pushSupported } from '../lib/push';
 import { haptic, isIOS, isStandalone, useOnline } from '../lib/device';
-import { countText, portionsFor, type Portion, type PortionChoice } from '../lib/portions';
+import { countText, guessUnit, plural, portionsFor, type Portion, type PortionChoice } from '../lib/portions';
 import { mealIdea, mealKind } from '../lib/mealIdeas';
 import { HeroLeaves, Icon, Ring, Sheet, Stepper, mealVisual, showToast } from '../components/ui';
 
@@ -239,12 +239,12 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<FoodItem | null>(null);
   const [scan, setScan] = useState(false);
-  const [creating, setCreating] = useState<{ code?: string } | null>(null);
+  const [creating, setCreating] = useState<{ code?: string; edit?: FoodItem } | null>(null);
   const [online, setOnline] = useState<{ q: string; items: FoodItem[] } | null>(null);
   const [onlineState, setOnlineState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [ciqualReady, setCiqualReady] = useState(false);
   const [retry, setRetry] = useState(0);
-  useStoreVersion();
+  const storeV = useStoreVersion();
 
   useEffect(() => {
     if (meal === null) return;
@@ -284,10 +284,17 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
     };
   }, [q, isOnline, meal, retry]);
 
-  const mine = useMemo(() => (q.trim() ? searchMine(q) : myFoods()).slice(0, 25), [q, meal, picked]);
+  const mine = useMemo(() => (q.trim() ? searchMine(q) : myFoods()).slice(0, 25), [q, meal, picked, storeV]);
   const ciq = useMemo(() => (q.trim().length >= 2 && ciqualReady ? searchCiqual(q) : []), [q, ciqualReady]);
   const favs = allOf<FavMeal>('favmeal');
   const onlineItems = online && online.q === q.trim() ? online.items.filter((x) => !mine.some((m) => m.ref === x.ref)) : [];
+
+  async function forget(f: FoodItem) {
+    haptic();
+    const prev = await forgetFood(f.ref);
+    setPicked(null);
+    showToast(`${f.name} supprimé de tes aliments`, prev ? { label: 'Annuler', run: () => void putDoc('myfood:' + f.ref, 'myfood', prev) } : undefined);
+  }
 
   async function add(item: FoodItem, qty: Qty) {
     if (meal === null) return;
@@ -337,7 +344,18 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
   return (
     <Sheet open={meal !== null} onClose={onClose} title={title} full>
       {picked ? (
-        <QuantityPanel item={picked} onBack={() => setPicked(null)} onConfirm={(qty) => add(picked, qty)} cta="Ajouter" />
+        <QuantityPanel
+          key={picked.ref + JSON.stringify(picked.unit ?? null)}
+          item={picked}
+          onBack={() => setPicked(null)}
+          onConfirm={(qty) => add(picked, qty)}
+          cta="Ajouter"
+          onForget={isMine(picked.ref) ? () => void forget(picked) : undefined}
+          onEditFood={picked.src === 'perso' ? () => {
+            setCreating({ edit: picked });
+            setPicked(null);
+          } : undefined}
+        />
       ) : scan ? (
         <Scanner
           onCancel={() => setScan(false)}
@@ -353,6 +371,7 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
       ) : creating ? (
         <CustomFoodForm
           code={creating.code}
+          initial={creating.edit}
           onCancel={() => setCreating(null)}
           onSaved={(item) => {
             setCreating(null);
@@ -405,7 +424,7 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
             </div>
           )}
 
-          {mine.length > 0 && <FoodList title={query ? 'Mes aliments' : 'Récents'} items={mine} onPick={setPicked} />}
+          {mine.length > 0 && <FoodList title={query ? 'Mes aliments' : 'Récents'} items={mine} onPick={setPicked} onForget={forget} />}
           {ciq.length > 0 && <FoodList title="Aliments de base" items={ciq} onPick={setPicked} />}
           {query.length >= 3 && isOnline && (
             <>
@@ -435,7 +454,7 @@ function AddFoodSheet({ date, meal, onClose }: { date: string; meal: number | nu
   );
 }
 
-function FoodList({ title, items, onPick }: { title: string; items: FoodItem[]; onPick: (f: FoodItem) => void }) {
+function FoodList({ title, items, onPick, onForget }: { title: string; items: FoodItem[]; onPick: (f: FoodItem) => void; onForget?: (f: FoodItem) => void }) {
   return (
     <div className="col" style={{ gap: 4 }}>
       <span className="small muted" style={{ fontWeight: 600 }}>
@@ -443,10 +462,11 @@ function FoodList({ title, items, onPick }: { title: string; items: FoodItem[]; 
       </span>
       <div className="col" style={{ gap: 0, margin: '0 -12px' }}>
         {items.map((f) => {
-          const por = portionsFor(f.name, f.serving)[0];
+          const por = portionsFor(f.name, f.serving, f.unit, (f as MyFood).units)[0];
           const k1 = por ? Math.round((f.per100.k * por.grams) / 100) : null;
           return (
-            <button key={f.ref + f.name} className="list-row press" onClick={() => onPick(f)}>
+            <div key={f.ref + f.name} className="row" style={{ gap: 0 }}>
+            <button className="list-row press grow" onClick={() => onPick(f)}>
               {f.image ? <img src={f.image} alt="" width={36} height={36} style={{ borderRadius: 8, objectFit: 'cover', flex: 'none', background: 'var(--line2)' }} /> : null}
               <div className="grow col" style={{ gap: 1 }}>
                 <span style={{ fontWeight: 600, fontSize: 15 }}>{f.name}</span>
@@ -457,6 +477,12 @@ function FoodList({ title, items, onPick }: { title: string; items: FoodItem[]; 
                 </span>
               </div>
             </button>
+            {onForget && (
+              <button className="icon-btn plain press" style={{ marginRight: 4 }} aria-label={`Supprimer ${f.name} de mes aliments`} onClick={() => onForget(f)}>
+                <Icon name="trash" size={18} />
+              </button>
+            )}
+            </div>
           );
         })}
       </div>
@@ -513,6 +539,8 @@ function QuantityPanel({
   cta,
   initial,
   onDelete,
+  onForget,
+  onEditFood,
 }: {
   item: FoodItem;
   onBack?: () => void;
@@ -520,9 +548,13 @@ function QuantityPanel({
   cta: string;
   initial?: Qty;
   onDelete?: () => void;
+  onForget?: () => void;
+  onEditFood?: () => void;
 }) {
   const mem = getData<MyFood>('myfood:' + item.ref);
-  const portions = useMemo(() => portionsFor(item.name, item.serving), [item.name, item.serving]);
+  const unitKey = JSON.stringify([item.unit ?? mem?.unit, mem?.units]);
+  const portions = useMemo(() => portionsFor(item.name, item.serving ?? mem?.serving, item.unit ?? mem?.unit, mem?.units), [item.name, item.serving, unitKey]);
+  const [editUnit, setEditUnit] = useState<number | null>(null);
   const startPortion =
     (initial?.portion && portions.find((p) => p.one === initial.portion!.one)) ||
     (!initial && mem?.lastPortion && portions.find((p) => p.one === mem.lastPortion!.one)) ||
@@ -602,9 +634,40 @@ function QuantityPanel({
               </button>
             ))}
           </div>
-          <p className="tiny muted" style={{ margin: 0, textAlign: 'center' }}>
-            Poids moyen : 1 {por.one} ≈ {por.grams} g. Tu as pesé ? Passe « En grammes » et tape le poids exact.
-          </p>
+          {editUnit === null ? (
+            <div className="row small" style={{ gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <span className="muted">
+                1 {por.one} = {por.grams} g
+              </span>
+              <button className="chip press" onClick={() => setEditUnit(por.grams)}>
+                <Icon name="edit" size={14} />
+                Modifier
+              </button>
+            </div>
+          ) : (
+            <div className="card col" style={{ gap: 10, background: 'var(--card2)', boxShadow: 'none', alignItems: 'center' }}>
+              <span className="small" style={{ fontWeight: 650 }}>
+                Chez toi, 1 {por.one} pèse :
+              </span>
+              <GramsInput value={editUnit} onChange={setEditUnit} />
+              <div className="row" style={{ gap: 8 }}>
+                <button className="chip press" onClick={() => setEditUnit(null)}>
+                  Annuler
+                </button>
+                <button
+                  className="chip press on"
+                  onClick={async () => {
+                    await setUnitWeight(item, por.one, editUnit);
+                    setPor({ ...por, grams: editUnit });
+                    setEditUnit(null);
+                    showToast(`C’est noté : 1 ${por.one} = ${editUnit} g`);
+                  }}
+                >
+                  Enregistrer
+                </button>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -643,6 +706,22 @@ function QuantityPanel({
           <Icon name="trash" size={18} />
           Retirer
         </button>
+      )}
+      {(onEditFood || onForget) && (
+        <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
+          {onEditFood && (
+            <button className="chip press" onClick={onEditFood}>
+              <Icon name="edit" size={15} />
+              Modifier l’aliment
+            </button>
+          )}
+          {onForget && (
+            <button className="chip press" onClick={onForget}>
+              <Icon name="trash" size={15} />
+              Supprimer de mes aliments
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -769,27 +848,41 @@ function Scanner({ onCancel, onFound, onUnknown }: { onCancel: () => void; onFou
   );
 }
 
-function CustomFoodForm({ code, onCancel, onSaved }: { code?: string; onCancel: () => void; onSaved: (f: FoodItem) => void }) {
-  const [name, setName] = useState('');
-  const [brand, setBrand] = useState('');
-  const [k, setK] = useState('');
-  const [p, setP] = useState('');
-  const [g, setG] = useState('');
-  const [l, setL] = useState('');
-  const [serving, setServing] = useState('');
+function CustomFoodForm({ code, initial, onCancel, onSaved }: { code?: string; initial?: FoodItem; onCancel: () => void; onSaved: (f: FoodItem) => void }) {
+  const r1 = (x: number) => String(Math.round(x * 10) / 10).replace('.', ',');
+  const u0 = initial?.unit;
+  const per = (x: number) => (u0 ? (x * u0.grams) / 100 : x);
+  const [name, setName] = useState(initial?.name ?? '');
+  const [brand, setBrand] = useState(initial?.brand ?? '');
+  const [byUnit, setByUnit] = useState(!!u0);
+  const [unitName, setUnitName] = useState(u0?.one ?? '');
+  const [unitGrams, setUnitGrams] = useState(u0 && u0.grams !== 100 ? r1(u0.grams) : '');
+  const [k, setK] = useState(initial ? r1(per(initial.per100.k)) : '');
+  const [p, setP] = useState(initial ? r1(per(initial.per100.p)) : '');
+  const [g, setG] = useState(initial ? r1(per(initial.per100.g)) : '');
+  const [l, setL] = useState(initial ? r1(per(initial.per100.l)) : '');
+  const [serving, setServing] = useState(initial?.serving && !u0 ? r1(initial.serving) : '');
   const n = (s: string) => Number(s.replace(',', '.')) || 0;
+  const unit = (unitName.trim() || guessUnit(name) || 'portion').toLowerCase();
+  const basis = byUnit ? `pour 1 ${unit}` : 'pour 100 g';
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    const kcal = n(k) || Math.round(n(p) * 4 + n(g) * 4 + n(l) * 9);
+    // à l'unité sans poids connu : on considère qu'une unité « pèse » 100 g
+    const w = byUnit ? n(unitGrams) || 100 : 100;
+    const f = 100 / w;
     const item: FoodItem = {
       name: name.trim(),
       brand: brand.trim() || undefined,
-      per100: { k: n(k) || Math.round(n(p) * 4 + n(g) * 4 + n(l) * 9), p: n(p), g: n(g), l: n(l) },
+      per100: { k: Math.round(kcal * f * 10) / 10, p: n(p) * f, g: n(g) * f, l: n(l) * f },
       src: 'perso',
-      ref: code ? 'off:' + code : 'perso:' + uid(),
-      serving: n(serving) || undefined,
+      ref: initial?.ref ?? (code ? 'off:' + code : 'perso:' + uid()),
+      serving: byUnit ? w : n(serving) || undefined,
+      unit: byUnit ? { one: unit, many: plural(unit), grams: w } : undefined,
     };
     await rememberFood(item);
+    showToast(initial ? 'Aliment modifié' : 'Aliment créé');
     onSaved(item);
   }
 
@@ -797,40 +890,72 @@ function CustomFoodForm({ code, onCancel, onSaved }: { code?: string; onCancel: 
     <form className="col" style={{ gap: 14 }} onSubmit={save}>
       {code && (
         <p className="small muted" style={{ margin: 0 }}>
-          Produit {code} inconnu ou incomplet. Recopie les valeurs de l’étiquette (pour 100 g) : la prochaine fois, le scan le retrouvera même sans réseau.
+          Produit {code} inconnu ou incomplet. Recopie les valeurs de l’étiquette : la prochaine fois, le scan le retrouvera même sans réseau.
         </p>
       )}
       <label className="field">
         <span>Nom</span>
-        <input required value={name} onChange={(e) => setName(e.target.value)} />
+        <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. : œuf plat, galette maison…" />
       </label>
       <label className="field">
         <span>Marque (facultatif)</span>
         <input value={brand} onChange={(e) => setBrand(e.target.value)} />
       </label>
+      <div className="col" style={{ gap: 6 }}>
+        <span className="small muted" style={{ fontWeight: 600 }}>
+          Les valeurs que tu as
+        </span>
+        <div className="segmented" role="group" aria-label="Valeurs pour">
+          <button type="button" aria-pressed={!byUnit} onClick={() => setByUnit(false)}>
+            Pour 100 g
+          </button>
+          <button type="button" aria-pressed={byUnit} onClick={() => setByUnit(true)}>
+            Pour 1 unité
+          </button>
+        </div>
+      </div>
+      {byUnit && (
+        <div className="fields-2">
+          <label className="field">
+            <span>L’unité</span>
+            <input value={unitName} onChange={(e) => setUnitName(e.target.value)} placeholder={guessUnit(name)} />
+          </label>
+          <label className="field">
+            <span>Poids d’une unité (g)</span>
+            <input inputMode="decimal" value={unitGrams} onChange={(e) => setUnitGrams(e.target.value)} placeholder="si tu le sais" />
+          </label>
+        </div>
+      )}
       <div className="fields-2">
         <label className="field">
-          <span>Protéines (g / 100 g)</span>
+          <span>Protéines (g {basis})</span>
           <input inputMode="decimal" required value={p} onChange={(e) => setP(e.target.value)} />
         </label>
         <label className="field">
-          <span>Glucides (g / 100 g)</span>
+          <span>Glucides (g {basis})</span>
           <input inputMode="decimal" required value={g} onChange={(e) => setG(e.target.value)} />
         </label>
         <label className="field">
-          <span>Lipides (g / 100 g)</span>
+          <span>Lipides (g {basis})</span>
           <input inputMode="decimal" required value={l} onChange={(e) => setL(e.target.value)} />
         </label>
         <label className="field">
-          <span>Calories (kcal / 100 g)</span>
+          <span>Calories ({basis})</span>
           <input inputMode="decimal" placeholder="calculées si vide" value={k} onChange={(e) => setK(e.target.value)} />
         </label>
       </div>
-      <label className="field">
-        <span>Portion habituelle en grammes (facultatif)</span>
-        <input inputMode="numeric" value={serving} onChange={(e) => setServing(e.target.value)} />
-      </label>
-      <button className="btn brand press">Enregistrer l’aliment</button>
+      {!byUnit && (
+        <label className="field">
+          <span>Portion habituelle en grammes (facultatif)</span>
+          <input inputMode="numeric" value={serving} onChange={(e) => setServing(e.target.value)} />
+        </label>
+      )}
+      {byUnit && (
+        <p className="tiny muted" style={{ margin: 0 }}>
+          Ensuite, tu choisis simplement « 1 {unit} », « 2 {plural(unit)} »… Élan compte les valeurs que tu as mises pour chaque {unit}.
+        </p>
+      )}
+      <button className="btn brand press">{initial ? 'Enregistrer les changements' : 'Enregistrer l’aliment'}</button>
       <button type="button" className="btn ghost press" onClick={onCancel}>
         Annuler
       </button>
