@@ -635,6 +635,11 @@ function ExerciseCard({
             </div>
           )}
           {ex.planned.note && <div className="small muted">{ex.planned.note}</div>}
+          {!ex.planned.note && CATALOG[ex.key]?.perSide && (
+            <div className="small muted">
+              {CATALOG[ex.key]?.timed ? 'Temps par côté : un côté, puis l’autre.' : 'Reps par côté : toutes les reps d’un côté, puis l’autre.'}
+            </div>
+          )}
 
           <div className="col" style={{ gap: 6 }}>
             <div className="set-row tiny muted" style={{ minHeight: 18, fontWeight: 600 }}>

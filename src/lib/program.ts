@@ -18,6 +18,8 @@ export type ExerciseDef = {
   increment: number;
   /** créé par l'utilisateur */
   custom?: boolean;
+  /** un côté puis l'autre (reps ou temps par côté) */
+  perSide?: boolean;
   alternatives: string[];
 };
 
@@ -53,7 +55,7 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('incline_machine', 'Développé incliné machine', 'Pectoraux', 'machine', false, true, ['incline_db', 'incline_bench']),
     ex('row', 'Rowing barre', 'Dos', 'barre', false, true, ['db_row', 'cable_row', 'tbar_row']),
     ex('tbar_row', 'Rowing T-bar', 'Dos', 'barre', false, true, ['row', 'cable_row']),
-    ex('db_row', 'Rowing haltère', 'Dos', 'haltères', false, true, ['cable_row', 'row', 'machine_row']),
+    ex('db_row', 'Rowing haltère', 'Dos', 'haltères', false, true, ['cable_row', 'row', 'machine_row'], { perSide: true }),
     ex('cable_row', 'Rowing assis poulie', 'Dos', 'poulie', false, true, ['db_row', 'machine_row']),
     ex('machine_row', 'Rowing machine', 'Dos', 'machine', false, true, ['cable_row', 'db_row']),
     ex('pullup', 'Tractions', 'Dos', 'poids du corps', false, true, ['lat_pulldown', 'assisted_pullup']),
@@ -86,9 +88,9 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('leg_curl', 'Leg curl', 'Ischios', 'machine', true, false, ['seated_leg_curl', 'db_rdl']),
     ex('seated_leg_curl', 'Leg curl assis', 'Ischios', 'machine', true, false, ['leg_curl']),
     ex('leg_ext', 'Leg extension', 'Quadriceps', 'machine', true, false, ['goblet_squat', 'leg_press']),
-    ex('bulgarian', 'Fentes bulgares', 'Quadriceps et fessiers', 'haltères', true, true, ['lunges', 'step_up'], { increment: 2 }),
+    ex('bulgarian', 'Fentes bulgares', 'Quadriceps et fessiers', 'haltères', true, true, ['lunges', 'step_up'], { increment: 2, perSide: true }),
     ex('lunges', 'Fentes marchées', 'Quadriceps et fessiers', 'haltères', true, true, ['bulgarian', 'step_up'], { increment: 2 }),
-    ex('step_up', 'Step-up', 'Quadriceps et fessiers', 'haltères', true, true, ['bulgarian', 'lunges'], { increment: 2 }),
+    ex('step_up', 'Step-up', 'Quadriceps et fessiers', 'haltères', true, true, ['bulgarian', 'lunges'], { increment: 2, perSide: true }),
     ex('hip_thrust', 'Hip thrust', 'Fessiers', 'barre', true, true, ['glute_bridge', 'glute_machine']),
     ex('glute_bridge', 'Pont fessier', 'Fessiers', 'barre', true, true, ['hip_thrust', 'glute_machine']),
     ex('glute_machine', 'Fessiers machine', 'Fessiers', 'machine', true, false, ['hip_thrust', 'glute_bridge']),
@@ -96,7 +98,9 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('seated_calf', 'Mollets assis', 'Mollets', 'machine', true, false, ['calf', 'press_calf']),
     ex('press_calf', 'Mollets à la presse', 'Mollets', 'machine', true, false, ['calf', 'seated_calf']),
     ex('plank', 'Gainage', 'Abdos', 'poids du corps', false, false, ['side_plank', 'dead_bug'], { timed: true, increment: 0 }),
-    ex('side_plank', 'Gainage latéral', 'Abdos', 'poids du corps', false, false, ['plank', 'dead_bug'], { timed: true, increment: 0 }),
+    ex('side_plank', 'Gainage latéral', 'Abdos', 'poids du corps', false, false, ['plank', 'dead_bug'], { timed: true, increment: 0, perSide: true }),
+    ex('side_plank_l', 'Gainage latéral, côté gauche', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
+    ex('side_plank_r', 'Gainage latéral, côté droit', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
     ex('dead_bug', 'Dead bug', 'Abdos', 'poids du corps', false, false, ['plank', 'side_plank'], { increment: 0 }),
     // Bras, pour aller plus loin
     ex('ez_curl', 'Curl barre EZ', 'Biceps', 'barre', false, false, ['barbell_curl', 'curl', 'cable_curl']),
@@ -142,11 +146,11 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('upright_row', 'Rowing menton', 'Épaules', 'barre', false, false, ['lateral', 'cable_lateral']),
     ex('arnold', 'Développé Arnold', 'Épaules', 'haltères', false, true, ['db_ohp', 'machine_shoulder'], { increment: 2 }),
     ex('preacher_curl', 'Curl pupitre', 'Biceps', 'barre', false, false, ['ez_curl', 'cable_curl']),
-    ex('concentration_curl', 'Curl concentré', 'Biceps', 'haltères', false, false, ['curl', 'hammer_curl'], { increment: 1 }),
+    ex('concentration_curl', 'Curl concentré', 'Biceps', 'haltères', false, false, ['curl', 'hammer_curl'], { increment: 1, perSide: true }),
     ex('spider_curl', 'Curl spider', 'Biceps', 'haltères', false, false, ['incline_curl', 'preacher_curl'], { increment: 1 }),
     ex('rope_pushdown', 'Extension triceps corde', 'Triceps', 'poulie', false, false, ['triceps', 'overhead_triceps']),
     ex('db_triceps', 'Extension triceps haltère', 'Triceps', 'haltères', false, false, ['overhead_triceps', 'skullcrusher'], { increment: 1 }),
-    ex('kickback', 'Kickback triceps', 'Triceps', 'haltères', false, false, ['triceps', 'db_triceps'], { increment: 1 }),
+    ex('kickback', 'Kickback triceps', 'Triceps', 'haltères', false, false, ['triceps', 'db_triceps'], { increment: 1, perSide: true }),
     ex('close_bench', 'Développé couché prise serrée', 'Triceps', 'barre', false, true, ['dips', 'skullcrusher']),
     ex('machine_dips', 'Dips machine', 'Triceps', 'machine', false, true, ['dips', 'triceps']),
     ex('front_squat', 'Squat avant', 'Quadriceps', 'barre', true, true, ['squat', 'hack_squat']),
@@ -155,7 +159,7 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('sumo_deadlift', 'Soulevé de terre sumo', 'Dos et jambes', 'barre', true, true, ['deadlift', 'trap_bar']),
     ex('abductor', 'Abducteurs machine', 'Fessiers', 'machine', true, false, ['glute_machine', 'hip_thrust']),
     ex('adductor', 'Adducteurs machine', 'Quadriceps', 'machine', true, false, ['goblet_squat']),
-    ex('cable_kickback', 'Kickback fessier poulie', 'Fessiers', 'poulie', true, false, ['glute_machine', 'hip_thrust'], { increment: 1.25 }),
+    ex('cable_kickback', 'Kickback fessier poulie', 'Fessiers', 'poulie', true, false, ['glute_machine', 'hip_thrust'], { increment: 1.25, perSide: true }),
     ex('crunch_machine', 'Crunch machine', 'Abdos', 'machine', false, false, ['crunch', 'cable_crunch']),
     ex('cable_crunch', 'Crunch à la poulie', 'Abdos', 'poulie', false, false, ['crunch_machine', 'crunch']),
   ].map((e) => [e.key, e])
@@ -212,25 +216,25 @@ const ss = (group: string, rest: number, a: PlannedExercise, b: PlannedExercise)
 
 export const ABS: Record<string, string[]> = {
   a: ['crunch', 'leg_raise', 'plank', 'russian_twist', 'mountain_climber'],
-  b: ['side_plank', 'dead_bug', 'hollow_hold', 'commando_plank', 'side_plank'],
+  b: ['side_plank_l', 'side_plank_r', 'dead_bug', 'hollow_hold', 'commando_plank'],
   c: ['hanging_leg_raise', 'bicycle_crunch', 'ab_wheel', 'v_up', 'plank'],
-  d: ['mountain_climber', 'side_plank', 'russian_twist', 'reverse_crunch', 'plank'],
+  d: ['mountain_climber', 'side_plank_l', 'side_plank_r', 'russian_twist', 'reverse_crunch'],
 };
 
 /** 12 circuits qui tournent : un différent à chaque séance, et la semaine suivante change tout */
 export const ABS_POOL: string[][] = [
   ['crunch', 'leg_raise', 'plank', 'russian_twist', 'mountain_climber'],
-  ['side_plank', 'dead_bug', 'hollow_hold', 'commando_plank', 'side_plank'],
+  ['side_plank_l', 'side_plank_r', 'dead_bug', 'hollow_hold', 'commando_plank'],
   ['hanging_leg_raise', 'bicycle_crunch', 'ab_wheel', 'v_up', 'plank'],
-  ['mountain_climber', 'side_plank', 'russian_twist', 'reverse_crunch', 'plank'],
+  ['mountain_climber', 'side_plank_l', 'side_plank_r', 'russian_twist', 'reverse_crunch'],
   ['flutter_kick', 'toe_touch', 'plank_shoulder_tap', 'heel_touch', 'hollow_hold'],
-  ['windshield', 'crunch', 'side_plank', 'scissor', 'bear_hold'],
-  ['v_up', 'mountain_climber', 'dead_bug', 'bicycle_crunch', 'side_plank'],
+  ['windshield', 'crunch', 'side_plank_l', 'side_plank_r', 'scissor'],
+  ['v_up', 'mountain_climber', 'bicycle_crunch', 'side_plank_l', 'side_plank_r'],
   ['reverse_crunch', 'heel_touch', 'ab_wheel', 'flutter_kick', 'commando_plank'],
-  ['hollow_hold', 'russian_twist', 'plank_shoulder_tap', 'leg_raise', 'side_plank'],
+  ['hollow_hold', 'russian_twist', 'leg_raise', 'side_plank_l', 'side_plank_r'],
   ['toe_touch', 'windshield', 'bear_hold', 'scissor', 'plank'],
-  ['hanging_leg_raise', 'side_plank', 'mountain_climber', 'heel_touch', 'hollow_hold'],
-  ['bicycle_crunch', 'dead_bug', 'commando_plank', 'reverse_crunch', 'side_plank'],
+  ['hanging_leg_raise', 'side_plank_l', 'side_plank_r', 'mountain_climber', 'hollow_hold'],
+  ['bicycle_crunch', 'dead_bug', 'reverse_crunch', 'side_plank_l', 'side_plank_r'],
 ];
 
 /**
