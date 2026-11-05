@@ -464,6 +464,48 @@ function FoodList({ title, items, onPick }: { title: string; items: FoodItem[]; 
   );
 }
 
+/** Poids au gramme près : on tape la valeur, ou on ajuste de 1 ou 10 g */
+function GramsInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => {
+    const n = Number(text.replace(',', '.'));
+    if (n !== value) setText(String(value).replace('.', ','));
+  }, [value]);
+  const set = (v: number) => onChange(Math.max(1, Math.round(v * 10) / 10));
+  const step = (d: number) => (
+    <button className="chip press" style={{ minWidth: 46, justifyContent: 'center', fontWeight: 700 }} onClick={() => set(value + d)} aria-label={`${d > 0 ? 'Plus' : 'Moins'} ${Math.abs(d)} g`}>
+      {d > 0 ? '+' : '−'}
+      {Math.abs(d)}
+    </button>
+  );
+  return (
+    <div className="row" style={{ gap: 6, justifyContent: 'center', alignItems: 'center' }}>
+      {step(-10)}
+      {step(-1)}
+      <label className="grams-field">
+        <input
+          inputMode="decimal"
+          enterKeyHint="done"
+          aria-label="Poids en grammes"
+          value={text}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => {
+            const v = e.target.value.replace(/[^0-9.,]/g, '');
+            setText(v);
+            const n = Number(v.replace(',', '.'));
+            if (n > 0) onChange(Math.round(n * 10) / 10);
+          }}
+          onBlur={() => setText(String(value).replace('.', ','))}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        />
+        <span>g</span>
+      </label>
+      {step(1)}
+      {step(10)}
+    </div>
+  );
+}
+
 function QuantityPanel({
   item,
   onBack,
@@ -554,19 +596,19 @@ function QuantityPanel({
             </button>
           </div>
           <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
-            {[0.5, 1, 2, 3, 4].map((c) => (
+            {[0.5, 1, 1.5, 2, 3, 4].map((c) => (
               <button key={c} className={'chip press' + (c === count ? ' on' : '')} onClick={() => setCount(c)} style={{ minWidth: 48, justifyContent: 'center' }}>
-                {c === 0.5 ? '½' : c}
+                {c === 0.5 ? '½' : c === 1.5 ? '1½' : c}
               </button>
             ))}
           </div>
           <p className="tiny muted" style={{ margin: 0, textAlign: 'center' }}>
-            Poids moyen : 1 {por.one} ≈ {por.grams} g. Passe en grammes si tu pèses.
+            Poids moyen : 1 {por.one} ≈ {por.grams} g. Tu as pesé ? Passe « En grammes » et tape le poids exact.
           </p>
         </>
       ) : (
         <>
-          <Stepper value={g} onChange={setG} step={10} unit="g" min={1} />
+          <GramsInput value={g} onChange={setG} />
           <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
             {chips.map((c) => (
               <button key={c} className={'chip press' + (c === g ? ' on' : '')} onClick={() => setG(c)}>
