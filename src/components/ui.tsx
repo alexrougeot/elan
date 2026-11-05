@@ -1,5 +1,6 @@
-import { AnimatePresence, motion, useDragControls, useReducedMotion } from 'motion/react';
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { animate, AnimatePresence, motion, useDragControls, useMotionValue, useMotionValueEvent, useReducedMotion, useTransform } from 'motion/react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { haptic } from '../lib/device';
 
 // ---------- Icônes (trait 2 px, coins ronds) ----------
 const PATHS: Record<string, string> = {
@@ -369,6 +370,89 @@ export function Stepper({
       <button className="press" aria-label={`Plus ${step}`} onClick={() => onChange(fix(value + step))}>
         <Icon name="plus" size={24} />
       </button>
+    </div>
+  );
+}
+
+// ---------- Glisser vers la gauche pour supprimer (comme sur iPhone) ----------
+const ACTION = 92;
+let closeOpenRow: (() => void) | null = null;
+
+export function SwipeRow({ children, onDelete, label = 'Supprimer' }: { children: ReactNode; onDelete: () => void; label?: string }) {
+  const x = useMotionValue(0);
+  const ref = useRef<HTMLDivElement>(null);
+  const dragged = useRef(false);
+  const armed = useRef(false);
+  const reduce = useReducedMotion();
+  const actionOpacity = useTransform(x, [-ACTION * 0.6, -12, 0], [1, 0.4, 0]);
+  const [full, setFull] = useState(false);
+  const spring = (to: number, velocity = 0) => animate(x, to, reduce ? { duration: 0.15 } : { type: 'spring', bounce: 0, duration: 0.35, velocity });
+
+  function close() {
+    spring(0);
+  }
+
+  // un retour haptique quand on passe le seuil de suppression complète
+  useMotionValueEvent(x, 'change', (v) => {
+    const w = ref.current?.offsetWidth ?? 360;
+    const past = v < -w * 0.55;
+    if (past !== armed.current) {
+      armed.current = past;
+      setFull(past);
+      if (past) haptic();
+    }
+  });
+
+  async function remove() {
+    const w = ref.current?.offsetWidth ?? 360;
+    await spring(-w - 40);
+    onDelete();
+    x.set(0);
+  }
+
+  return (
+    <div ref={ref} className="swipe-row">
+      <motion.button className="swipe-action" style={{ opacity: actionOpacity }} onClick={remove} aria-label={label} tabIndex={-1}>
+        <Icon name="trash" size={20} />
+        <span>{full ? 'Lâche' : label}</span>
+      </motion.button>
+      <motion.div
+        className="swipe-front"
+        style={{ x }}
+        drag="x"
+        dragDirectionLock
+        dragConstraints={{ left: -Infinity, right: 0 }}
+        dragElastic={{ left: 0, right: 0.15 }}
+        dragMomentum={false}
+        onDragStart={() => {
+          dragged.current = true;
+          if (closeOpenRow && closeOpenRow !== close) closeOpenRow();
+        }}
+        onDragEnd={(_, info) => {
+          const w = ref.current?.offsetWidth ?? 360;
+          const end = x.get() + project(info.velocity.x);
+          // suppression directe seulement si on a vraiment tiré loin (pas sur un simple coup de doigt)
+          if (x.get() < -w * 0.55) void remove();
+          else if (end < -ACTION / 2) {
+            spring(-ACTION, info.velocity.x);
+            closeOpenRow = close;
+          } else spring(0, info.velocity.x);
+          setTimeout(() => (dragged.current = false), 80);
+        }}
+        onClickCapture={(e) => {
+          // le clic qui suit un glissé est ignoré ; un tap sur une ligne ouverte la referme
+          if (dragged.current) {
+            e.stopPropagation();
+            e.preventDefault();
+          } else if (x.get() < -4) {
+            e.stopPropagation();
+            e.preventDefault();
+            close();
+          }
+        }}
+      >
+        {children}
+      </motion.div>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { currentSubscription, enablePush, pushSupported } from '../lib/push';
 import { haptic, isIOS, isStandalone, useOnline } from '../lib/device';
 import { countText, guessUnit, plural, portionsFor, type Portion, type PortionChoice } from '../lib/portions';
 import { mealIdea, mealKind } from '../lib/mealIdeas';
-import { HeroLeaves, Icon, Ring, Sheet, Stepper, mealVisual, showToast } from '../components/ui';
+import { HeroLeaves, Icon, Ring, Sheet, Stepper, SwipeRow, mealVisual, showToast } from '../components/ui';
 
 type FavMeal = { name: string; items: (FoodItem & { grams: number; portion?: FoodEntry['portion'] })[] };
 
@@ -36,6 +36,12 @@ export default function Nutrition() {
   const extra = dayBonus(date, profile?.goal ?? 'masse', currentWeight(profile));
   const dayT = { ...targets, kcal: targets.kcal + extra.bonus, g: targets.g + Math.round(extra.bonus / 4) };
   const left = dayT.kcal - totals.k;
+
+  async function removeEntry(id: string) {
+    const prev = getDoc<FoodEntry>(id)?.data;
+    await removeDoc(id);
+    if (prev) showToast(`${prev.name} retiré`, { label: 'Annuler', run: () => void putDoc(id, 'food', prev) });
+  }
 
   async function copyYesterday(meal: number) {
     const y = foodsOn(addDays(date, -1)).filter((f) => f.data.meal === meal);
@@ -181,7 +187,8 @@ export default function Nutrition() {
             {items.length > 0 && (
               <div className="col" style={{ gap: 0, margin: '0 -10px' }}>
                 {items.map((f) => (
-                  <button key={f.id} className="list-row press" style={{ minHeight: 48, padding: '6px 10px' }} onClick={() => setEditing(f.id)}>
+                  <SwipeRow key={f.id} onDelete={() => removeEntry(f.id)} label="Retirer">
+                  <button className="list-row press" style={{ minHeight: 48, padding: '6px 10px', width: '100%' }} onClick={() => setEditing(f.id)}>
                     <div className="grow col" style={{ gap: 1 }}>
                       <span style={{ fontWeight: 600, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.data.name}</span>
                       <span className="tiny muted">
@@ -193,6 +200,7 @@ export default function Nutrition() {
                       {fmtNum(entryMacros(f.data).k)} kcal
                     </span>
                   </button>
+                  </SwipeRow>
                 ))}
               </div>
             )}
@@ -465,7 +473,8 @@ function FoodList({ title, items, onPick, onForget }: { title: string; items: Fo
           const por = portionsFor(f.name, f.serving, f.unit, (f as MyFood).units)[0];
           const k1 = por ? Math.round((f.per100.k * por.grams) / 100) : null;
           return (
-            <div key={f.ref + f.name} className="row" style={{ gap: 0 }}>
+            <SwipeRow key={f.ref + f.name} onDelete={() => onForget?.(f)} label="Supprimer">
+            <div className="row" style={{ gap: 0, background: 'var(--card)' }}>
             <button className="list-row press grow" onClick={() => onPick(f)}>
               {f.image ? <img src={f.image} alt="" width={36} height={36} style={{ borderRadius: 8, objectFit: 'cover', flex: 'none', background: 'var(--line2)' }} /> : null}
               <div className="grow col" style={{ gap: 1 }}>
@@ -483,6 +492,7 @@ function FoodList({ title, items, onPick, onForget }: { title: string; items: Fo
               </button>
             )}
             </div>
+            </SwipeRow>
           );
         })}
       </div>
