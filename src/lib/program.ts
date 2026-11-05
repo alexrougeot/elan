@@ -253,7 +253,11 @@ export const abs = (keys: string[]): PlannedExercise => ({
   circuit: { keys, work: 40, rest: 20, rounds: 2 },
 });
 
-export const PROGRAM_VERSION = 2;
+export const PROGRAM_VERSION = 3;
+
+/** v3 : épaules (côté et arrière) à la place d'une partie des bras, abdos les jours jambes */
+const SHOULDERS_A = ss('C', 75, p('lateral', 3, 12, 15), p('face_pull', 3, 12, 15));
+const SHOULDERS_B = p('face_pull', 3, 12, 15, { rest: 75 });
 
 export function upperLowerProgram(startDate: string): Program {
   return {
@@ -271,9 +275,8 @@ export function upperLowerProgram(startDate: string): Program {
           p('bench', 4, 6, 8),
           p('row', 4, 6, 8),
           ...ss('A', 90, p('db_ohp', 3, 8, 10), p('pullup', 3, 8, 10)),
-          ...ss('B', 75, p('ez_curl', 4, 8, 10), p('skullcrusher', 4, 8, 10)),
-          ...ss('C', 75, p('hammer_curl', 3, 10, 12), p('triceps', 3, 12, 15, { note: 'Dernière série en dégressive : enlève 30 % et repars sans pause jusqu’à l’échec.' })),
-          abs(ABS.a),
+          ...ss('B', 75, p('ez_curl', 3, 8, 10), p('skullcrusher', 3, 8, 10)),
+          ...SHOULDERS_A,
         ],
       },
       {
@@ -292,9 +295,8 @@ export function upperLowerProgram(startDate: string): Program {
           p('incline_db', 4, 8, 12),
           p('lat_pulldown', 4, 10, 12),
           ...ss('A', 75, p('db_row', 3, 10, 12), p('lateral', 4, 12, 15)),
-          ...ss('B', 75, p('incline_curl', 4, 10, 12), p('overhead_triceps', 4, 10, 12)),
-          ...ss('C', 60, p('curl_21', 2, 21, 21), p('diamond_pushup', 2, 8, 20, { note: 'Au maximum de reps, en gardant les coudes serrés.' })),
-          abs(ABS.c),
+          ...ss('B', 75, p('incline_curl', 3, 10, 12), p('overhead_triceps', 3, 10, 12)),
+          SHOULDERS_B,
         ],
       },
       {
@@ -355,8 +357,37 @@ const OLD_SIGNATURES = [
   'fb-a:squat,db_bench,lat_pulldown,hip_thrust,plank|fb-b:rdl,db_ohp,db_row,bulgarian,lateral|fb-c:leg_press,incline_db,cable_row,leg_curl,calf',
 ];
 
+/**
+ * v2 → v3, séance par séance (on garde les exercices changés à la main) :
+ * Haut A perd curl marteau + extension poulie et gagne latérales + face pull,
+ * Haut B perd curl 21 + pompes diamant et gagne face pull, les supersets de bras passent à 3 séries,
+ * les abdos restent seulement les jours jambes.
+ */
+function toV3(prog: Program): Program {
+  const days = prog.days.map((d) => {
+    if (d.id !== 'haut-a' && d.id !== 'haut-b') return d;
+    const drop = d.id === 'haut-a' ? ['hammer_curl', 'triceps'] : ['curl_21', 'diamond_pushup'];
+    const trim = d.id === 'haut-a' ? ['ez_curl', 'skullcrusher'] : ['incline_curl', 'overhead_triceps'];
+    let exercises = d.exercises
+      .filter((e) => !e.circuit && !(e.group === 'C' && drop.includes(e.key)))
+      .map((e) => (trim.includes(e.key) && e.sets === 4 ? { ...e, sets: 3 } : e));
+    const has = (k: string) => exercises.some((e) => e.key === k);
+    if (d.id === 'haut-a' && !has('face_pull')) {
+      const letter = ['C', 'D', 'E', 'F', 'G'].find((g) => !exercises.some((e) => e.group === g)) ?? 'Z';
+      exercises = has('lateral') ? [...exercises, { ...SHOULDERS_B }] : [...exercises, ...SHOULDERS_A.map((e) => ({ ...e, group: letter }))];
+    }
+    if (d.id === 'haut-b' && !has('face_pull')) exercises = [...exercises, { ...SHOULDERS_B }];
+    return { ...d, exercises };
+  });
+  return { ...prog, days, version: PROGRAM_VERSION };
+}
+
 export function upgradedProgram(prog: Program): Program | null {
   if ((prog.version ?? 1) >= PROGRAM_VERSION) return null;
+  if (prog.version === 2) {
+    const next = toV3(prog);
+    return JSON.stringify(next.days) === JSON.stringify(prog.days) ? null : next;
+  }
   const sig = prog.days.map((d) => d.id + ':' + d.exercises.map((e) => e.key).join(',')).join('|');
   const i = OLD_SIGNATURES.indexOf(sig);
   if (i < 0) return null;
