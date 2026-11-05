@@ -134,7 +134,7 @@ function Shell() {
     const next = prog ? upgradedProgram(prog) : null;
     if (next) {
       void putDoc('program', 'program', next);
-      showToast('Programme mis à jour : plus d’épaules, séances du haut plus courtes, abdos les jours jambes', undefined, 6000);
+      showToast('Programme mis à jour : latérales et face pull en plus, abdos à chaque séance', undefined, 6000);
     }
   }, []);
 
