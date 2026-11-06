@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Session as AuthSession } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { getData, openStore, putDoc, useStoreVersion } from './lib/store';
-import { loadCustomExercises, upgradedProgram, type Program } from './lib/program';
+import { loadCustomExercises, upgradedProgram, womenSwap, type Program } from './lib/program';
 import { startSyncLoop, syncNow } from './lib/sync';
 import type { Profile } from './lib/nutrition';
 import { Icon, LogoMark, Toasts, showToast } from './components/ui';
@@ -131,6 +131,24 @@ function Shell() {
   // Programme type d'origine jamais modifié : on passe à la nouvelle version
   useEffect(() => {
     const prog = getData<Program>('program');
+    const sex = getData<{ sex?: string }>('profile')?.sex;
+    const women = prog ? womenSwap(prog, sex) : null;
+    if (prog && women) {
+      void putDoc('program', 'program', women);
+      // séances décalées : on garde le décalage, avec la séance qui tombe le même jour dans le nouveau programme
+      const moves = getData<Record<string, string | null>>('moves');
+      if (moves) {
+        const map: Record<string, string> = {};
+        for (const d of prog.days) {
+          const n = women.days.find((x) => x.weekday === d.weekday);
+          if (n) map[d.id] = n.id;
+        }
+        const next = Object.fromEntries(Object.entries(moves).map(([k, v]) => [k, v && map[v] ? map[v] : v]));
+        if (JSON.stringify(next) !== JSON.stringify(moves)) void putDoc('moves', 'moves', next);
+      }
+      showToast('Nouveau programme rien que pour toi : fessiers et jambes, haut du corps tonique, gainage à chaque séance', undefined, 7000);
+      return;
+    }
     const next = prog ? upgradedProgram(prog) : null;
     if (next) {
       void putDoc('program', 'program', next);

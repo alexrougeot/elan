@@ -4,14 +4,19 @@ import { DEFAULT_DAYS } from '../lib/program';
 const LETTERS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 const NAMES = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 
-export function programKind(count: number) {
+export function programKind(count: number, sex?: string) {
+  if (sex === 'f') {
+    if (count <= 3) return { title: 'Full body', text: 'Tout le corps à chaque séance, fessiers et jambes en priorité, gainage à la fin.' };
+    if (count === 4) return { title: 'Bas / haut', text: 'Deux séances fessiers et jambes, deux séances haut du corps (dos, épaules), gainage à chaque fois.' };
+    return { title: 'Bas / haut + full body', text: 'Les 4 séances bas / haut, plus une séance tout le corps.' };
+  }
   if (count <= 3) return { title: 'Full body', text: 'Tout le corps à chaque séance. Idéal à 2 ou 3 séances.' };
   if (count === 4) return { title: 'Haut / bas', text: 'Haut du corps et jambes en alternance : chaque muscle 2 fois par semaine.' };
   return { title: 'Haut / bas + full body', text: 'Les 4 séances haut / bas, plus une séance tout le corps.' };
 }
 
-export default function ProgramChooser({ count, days, onChange }: { count: number; days: number[]; onChange: (count: number, days: number[]) => void }) {
-  const kind = programKind(count);
+export default function ProgramChooser({ count, days, onChange, sex }: { count: number; days: number[]; onChange: (count: number, days: number[]) => void; sex?: string }) {
+  const kind = programKind(count, sex);
   const missing = count - days.length;
 
   function toggle(wd: number) {

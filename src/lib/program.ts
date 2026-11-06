@@ -188,6 +188,8 @@ export type Program = {
   /** activités qui ne comptent pas comme séance (cours collectif…) */
   extras: { weekday: number; title: string }[];
   version?: number;
+  /** programme type femme */
+  audience?: 'f';
 };
 
 export function defaultRest(key: string) {
@@ -423,11 +425,140 @@ export function upgradedProgram(prog: Program): Program | null {
 /** Jours conseillés selon le nombre de séances (1 = lundi) */
 export const DEFAULT_DAYS: Record<number, number[]> = { 2: [1, 4], 3: [1, 3, 5], 4: [1, 3, 4, 5], 5: [1, 2, 3, 4, 5] };
 
+// ---------------- Programme femme ----------------
+// Fessiers et jambes en priorité, haut du corps tonique sans gros volume de bras,
+// machines et haltères plutôt que barre lourde, 10 à 15 reps, supersets pour garder des séances courtes,
+// gainage à chaque séance. Jamais de bras les jours jambes.
+const w = (key: string, sets: number, min: number, max: number, rest: number, extra: Partial<PlannedExercise> = {}): PlannedExercise => ({ key, sets, min, max, rest, ...extra });
+
+const W_DAYS: Record<string, ProgramDay> = {
+  'f-bas-a': {
+    id: 'f-bas-a',
+    weekday: 1,
+    title: 'Bas A',
+    subtitle: 'fessiers et cuisses',
+    exercises: [
+      w('hip_thrust', 4, 8, 12, 120),
+      w('leg_press', 3, 10, 12, 105),
+      w('lunges', 3, 10, 12, 90, { note: 'Haltères en main, en alternant : 10 à 12 pas par jambe.' }),
+      ...ss('A', 60, w('leg_ext', 3, 12, 15, 60), w('abductor', 3, 15, 20, 60)),
+      abs(ABS.a),
+    ],
+  },
+  'f-haut-a': {
+    id: 'f-haut-a',
+    weekday: 3,
+    title: 'Haut A',
+    subtitle: 'dos et épaules',
+    exercises: [
+      w('lat_pulldown', 3, 10, 12, 90),
+      w('db_bench', 3, 10, 12, 90),
+      ...ss('A', 75, w('cable_row', 3, 10, 12, 75), w('db_ohp', 3, 10, 12, 75)),
+      ...ss('B', 60, w('lateral', 3, 12, 15, 60), w('face_pull', 3, 12, 15, 60)),
+      abs(ABS.b),
+    ],
+  },
+  'f-bas-b': {
+    id: 'f-bas-b',
+    weekday: 4,
+    title: 'Bas B',
+    subtitle: 'ischios et fessiers',
+    exercises: [
+      w('db_rdl', 3, 10, 12, 105),
+      w('goblet_squat', 3, 12, 15, 90),
+      ...ss('A', 60, w('seated_leg_curl', 3, 12, 15, 60), w('cable_kickback', 3, 12, 15, 60)),
+      w('glute_bridge', 2, 15, 20, 60, { note: 'Barre ou haltère sur les hanches, serre les fessiers 1 s en haut.' }),
+      abs(ABS.c),
+    ],
+  },
+  'f-haut-b': {
+    id: 'f-haut-b',
+    weekday: 5,
+    title: 'Haut B',
+    subtitle: 'dos, poitrine et gainage',
+    exercises: [
+      w('assisted_pullup', 3, 8, 12, 90),
+      ...ss('A', 75, w('chest_press', 3, 10, 12, 75), w('db_row', 3, 10, 12, 75)),
+      ...ss('B', 60, w('cable_lateral', 3, 12, 15, 60), w('reverse_fly', 3, 12, 15, 60)),
+      ...ss('C', 60, w('curl', 2, 12, 15, 60), w('rope_pushdown', 2, 12, 15, 60)),
+      abs(ABS.d),
+    ],
+  },
+  'f-fb-a': {
+    id: 'f-fb-a',
+    weekday: 1,
+    title: 'Full body A',
+    subtitle: 'fessiers et dos',
+    exercises: [
+      w('hip_thrust', 3, 10, 12, 120),
+      w('leg_press', 3, 10, 12, 105),
+      ...ss('A', 75, w('lat_pulldown', 3, 10, 12, 75), w('db_bench', 3, 10, 12, 75)),
+      abs(ABS.a),
+    ],
+  },
+  'f-fb-b': {
+    id: 'f-fb-b',
+    weekday: 3,
+    title: 'Full body B',
+    subtitle: 'ischios et épaules',
+    exercises: [
+      w('db_rdl', 3, 10, 12, 105),
+      w('lunges', 3, 10, 12, 90, { note: 'Haltères en main, en alternant : 10 à 12 pas par jambe.' }),
+      ...ss('A', 75, w('cable_row', 3, 10, 12, 75), w('db_ohp', 3, 10, 12, 75)),
+      abs(ABS.b),
+    ],
+  },
+  'f-fb-c': {
+    id: 'f-fb-c',
+    weekday: 5,
+    title: 'Full body C',
+    subtitle: 'cuisses et haut du corps',
+    exercises: [
+      w('goblet_squat', 3, 12, 15, 90),
+      ...ss('A', 60, w('seated_leg_curl', 3, 12, 15, 60), w('abductor', 3, 15, 20, 60)),
+      ...ss('B', 60, w('chest_press', 3, 10, 12, 60), w('face_pull', 3, 12, 15, 60)),
+      abs(ABS.c),
+    ],
+  },
+};
+
+export function womenProgramFor(count: number, weekdays: number[], startDate: string, keepExtras: Program['extras'] = []): Program {
+  const days = [...weekdays].sort((a, b) => a - b);
+  const ids =
+    count <= 3
+      ? ['f-fb-a', 'f-fb-b', 'f-fb-c'].slice(0, Math.max(2, count))
+      : count === 4
+        ? ['f-bas-a', 'f-haut-a', 'f-bas-b', 'f-haut-b']
+        : ['f-bas-a', 'f-haut-a', 'f-bas-b', 'f-haut-b', 'f-fb-c'];
+  const name = count <= 3 ? `Full body · ${ids.length} séances` : count === 4 ? 'Bas / haut · 4 séances' : 'Bas / haut + full body · 5 séances';
+  return {
+    name,
+    startDate,
+    deloadEvery: 7,
+    version: PROGRAM_VERSION,
+    audience: 'f',
+    days: ids.map((id, i) => ({ ...structuredClone(W_DAYS[id]), id: i === 4 ? 'f-bonus' : id, subtitle: i === 4 ? 'bonus' : W_DAYS[id].subtitle, weekday: days[i] ?? W_DAYS[id].weekday })),
+    extras: keepExtras.filter((x) => !days.includes(x.weekday)),
+  };
+}
+
+const MEN_STOCK_IDS = new Set(['haut-a', 'bas-a', 'haut-b', 'bas-b', 'fb-a', 'fb-b', 'fb-c', 'fb-bonus']);
+
+/** Une femme avec le programme type homme : on le remplace par le sien (mêmes jours) */
+export function womenSwap(prog: Program, sex?: string): Program | null {
+  if (sex !== 'f' || prog.audience === 'f' || !prog.days.length || !prog.days.every((d) => MEN_STOCK_IDS.has(d.id))) return null;
+  const next = womenProgramFor(Math.min(5, prog.days.length), prog.days.map((d) => d.weekday), prog.startDate, prog.extras);
+  next.deloadEvery = prog.deloadEvery;
+  return next;
+}
+
 /**
  * Programme selon le nombre de séances par semaine et les jours choisis :
  * 2 ou 3 séances → full body, 4 → haut / bas, 5 → haut / bas + un full body.
+ * Pour une femme : programme à part (fessiers et jambes, pas de bras les jours jambes).
  */
-export function programFor(count: number, weekdays: number[], startDate: string, keepExtras: Program['extras'] = []): Program {
+export function programFor(count: number, weekdays: number[], startDate: string, keepExtras: Program['extras'] = [], sex?: string): Program {
+  if (sex === 'f') return womenProgramFor(count, weekdays, startDate, keepExtras);
   const days = [...weekdays].sort((a, b) => a - b);
   const fb = fullBodyProgram(startDate);
   const ul = upperLowerProgram(startDate);

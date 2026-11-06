@@ -55,7 +55,7 @@ export default function Onboarding() {
     const today = dayKey();
     const t: Targets = { ...targets, meals: defaultMeals(goal), mode: 'auto', history: [] };
     await putDoc('targets', 'targets', t);
-    const prog = custom ? emptyProgram(today) : programFor(count, days, today);
+    const prog = custom ? emptyProgram(today) : programFor(count, days, today, [], sex);
     await putDoc('program', 'program', prog);
     await putDoc('weight:' + today, 'weight', { date: today, kg: profile.weight });
     await putDoc('settings', 'settings', { bar: 20, sound: true });
@@ -167,6 +167,7 @@ export default function Onboarding() {
               <ProgramChooser
                 count={count}
                 days={days}
+                sex={sex}
                 onChange={(c, d) => {
                   setCount(c);
                   setDays(d);

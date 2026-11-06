@@ -495,13 +495,13 @@ function ProgramPage({ startDay }: { startDay?: string }) {
           </button>
         ) : (
           <div className="card col" style={{ gap: 12, background: 'var(--card2)', boxShadow: 'none' }}>
-            <ProgramChooser count={rebuild.count} days={rebuild.days} onChange={(count, days) => setRebuild({ count, days })} />
+            <ProgramChooser count={rebuild.count} days={rebuild.days} sex={getData<Profile>('profile')?.sex} onChange={(count, days) => setRebuild({ count, days })} />
             <span className="small muted">Ton programme est recréé pour ces jours, avec les exercices du programme type (tes changements d’exercices sont remplacés). Ton historique et tes charges restent : le coach reprend là où tu en es.</span>
             <button
               className="btn brand press"
               disabled={rebuild.days.length !== rebuild.count}
               onClick={async () => {
-                await save(programFor(rebuild.count, rebuild.days, program.startDate, program.extras));
+                await save(programFor(rebuild.count, rebuild.days, program.startDate, program.extras, getData<Profile>('profile')?.sex));
                 setRebuild(null);
                 showToast('Programme mis à jour');
               }}
