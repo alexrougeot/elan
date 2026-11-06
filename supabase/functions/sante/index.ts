@@ -142,6 +142,22 @@ function heartOf(w: HaeWorkout) {
   return { avg: avg !== undefined ? Math.round(avg) : undefined, max: max !== undefined ? Math.round(max) : undefined };
 }
 
+/** Courbe du cœur pendant l'entraînement : [secondes depuis le début, bpm], 240 points au plus */
+function hrSeries(w: HaeWorkout, start: Date) {
+  const raw: Record<string, unknown>[] = Array.isArray(w.heartRateData) ? w.heartRateData : Array.isArray(w.heartRate?.data) ? w.heartRate.data : [];
+  const pts: number[][] = [];
+  for (const p of raw) {
+    const t = haeDate(p.date ?? p.timestamp ?? p.start);
+    const v = num(p.Avg ?? p.avg ?? p.qty ?? p.value);
+    if (!t || v === undefined || v < 30 || v > 240) continue;
+    pts.push([Math.round((t.getTime() - start.getTime()) / 1000), Math.round(v)]);
+  }
+  pts.sort((a, b) => a[0] - b[0]);
+  if (pts.length < 3) return undefined;
+  const step = Math.max(1, Math.ceil(pts.length / 240));
+  return pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
+}
+
 /** Nom de l'appareil : la source peut être un texte, un objet ou une liste */
 function sourceOf(w: HaeWorkout): string {
   const pickName = (v: unknown): string | undefined => {
@@ -173,6 +189,7 @@ async function importWorkouts(userId: string, workouts: HaeWorkout[]) {
     const minutes = Math.max(1, Math.round((num(w.duration) ?? (end.getTime() - start.getTime()) / 1000) / 60));
     const kcal = kcalOf(w.activeEnergyBurned ?? w.activeEnergy ?? w.totalEnergy);
     const heart = heartOf(w);
+    const hr = hrSeries(w, start);
     const { route, splits, gain, dist } = routeOf(w, start);
     const distance = km(w.distance) ?? dist;
     const elev = qty(w.elevationUp) ?? num(w.elevation?.ascent) ?? gain;
@@ -200,7 +217,7 @@ async function importWorkouts(userId: string, workouts: HaeWorkout[]) {
       const circuit = list.find((d) => d.kind === 'activity' && ['hyrox', 'circuit'].includes(String(d.data.type)));
       const match = kind === 'cardio' ? circuit ?? session : session ?? circuit;
       if (match?.kind === 'activity') {
-        const data = { ...match.data, kcal: kcal !== undefined ? Math.round(kcal) : match.data.kcal, hrAvg: heart.avg, hrMax: heart.max, source };
+        const data = { ...match.data, kcal: kcal !== undefined ? Math.round(kcal) : match.data.kcal, hrAvg: heart.avg, hrMax: heart.max, hr, source };
         await admin.from('docs').upsert({ user_id: userId, id: match.id, kind: 'activity', data, updated_at: now, deleted: false }, { onConflict: 'user_id,id' });
         imported++;
         lines.push(`${name} rattaché`);
@@ -216,6 +233,10 @@ async function importWorkouts(userId: string, workouts: HaeWorkout[]) {
         hrMax: heart.max ?? null,
         minutes,
         source,
+        name,
+        start: start.toISOString(),
+        end: end.toISOString(),
+        hr,
         at: now,
       };
       await admin.from('docs').upsert({ user_id: userId, id, kind: 'health', data, updated_at: now, deleted: false }, { onConflict: 'user_id,id' });
@@ -239,6 +260,7 @@ async function importWorkouts(userId: string, workouts: HaeWorkout[]) {
       kcal: kcal !== undefined ? Math.round(kcal) : undefined,
       hrAvg: heart.avg,
       hrMax: heart.max,
+      hr,
       elev: elev !== undefined ? Math.round(elev) : undefined,
       route,
       kmSplits: splits,

@@ -8,7 +8,8 @@ import { activeSession, extraFor, getMoves, getProgram, planFor, sessionToday, u
 import SkipSheet from '../components/SkipSheet';
 import { isDeloadWeek, sessions } from '../lib/coach';
 import { useSyncStatus } from '../lib/sync';
-import { getLink, healthForSession, healthLine, healthOn, runShortcut } from '../lib/health';
+import { getLink, healthForSession, healthLine, healthOn } from '../lib/health';
+import { checkWatch } from '../components/WatchCard';
 import { addWater, GLASS, WATER_REMINDERS, waterGoal, waterOn } from '../lib/water';
 import { ACTIVITY, activities, activitiesOn, activityKcal, activityLine, askCircuit, dayBonus } from '../lib/activity';
 import ActivitySheet, { bonusFood } from '../components/ActivitySheet';
@@ -278,7 +279,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
             <div className="row between" style={{ gap: 8 }}>
               <span className="small muted">Bien joué. Pense à bien manger après la séance.</span>
               {getLink() && (
-                <button className="chip press" onClick={runShortcut}>
+                <button className="chip press" onClick={() => void checkWatch(done.id)}>
                   <Icon name="timer" size={16} />
                   Montre
                 </button>

@@ -7,6 +7,7 @@ import { autoAdjust, bestE1rm, e1rm, historyFor, prepareExercise, sessions, type
 import { activeSession, adjustRest, getProgram, groupMembers, nextPending, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest, warmupsFor, type Readiness } from '../lib/workout';
 import { haptic, keepScreenOn, tone, unlockAudio } from '../lib/device';
 import { getLink, healthForSession, healthLine } from '../lib/health';
+import WatchCard from '../components/WatchCard';
 import { HeroLeaves, Icon, Ring, Sheet, Stepper, muscleTint, showToast, useNow } from '../components/ui';
 import { ACTIVITY, activeCircuit, activities, activitiesOn, activityLine, takeCircuitAsk } from '../lib/activity';
 import ActivitySheet from '../components/ActivitySheet';
@@ -1325,6 +1326,7 @@ function PastSessionSheet({ id, onClose }: { id: string | null; onClose: () => v
       <span className="small muted">
         {longDate(s.date)} · {st.sets} séries · {fmtNum(st.volume)} kg soulevés
       </span>
+      <WatchCard sessionId={id} session={s} />
       <div className="card tight" style={{ background: 'var(--card2)', boxShadow: 'none' }}>
         {s.exercises
           .filter((e) => e.sets.some((x) => x.done))

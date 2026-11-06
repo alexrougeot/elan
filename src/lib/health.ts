@@ -11,8 +11,19 @@ export type HealthEntry = {
   hrMax: number | null;
   minutes: number;
   source: string;
+  /** nom de l'entraînement sur la montre */
+  name?: string;
+  start?: string;
+  end?: string;
+  /** cœur : [secondes depuis le début, bpm] */
+  hr?: number[][];
   at: string;
 };
+
+/** Ouvre Health Auto Export : il envoie en général à l'ouverture ce qu'il n'a pas encore envoyé */
+export function openHae() {
+  location.href = 'com.HealthExport://';
+}
 
 export const SHORTCUT_NAME = 'Élan montre';
 export const SANTE_URL = SUPABASE_URL + '/functions/v1/sante';
