@@ -64,6 +64,12 @@ function roundTo(x: number, step: number) {
   return Math.max(0, Math.round(x / step) * step);
 }
 
+/** Arrondi qui respecte une charge choisie à la main (23 kg reste en pas de 0,5 kg, pas ramené à 22,5) */
+function roundLike(ref: number, x: number, step: number) {
+  const onGrid = Math.abs(ref / step - Math.round(ref / step)) < 1e-6;
+  return onGrid ? roundTo(x, step) : Math.max(0, Math.round(x * 2) / 2);
+}
+
 function failed(ex: SessionExercise) {
   const done = ex.sets.filter((s) => s.done);
   return done.length < ex.planned.sets || done.some((s) => s.r < ex.planned.min);
@@ -127,7 +133,7 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
       ? { kind: 'same', text: `Tu as tenu ${planned.max} s partout : passe à une variante plus dure ou garde ce temps.` }
       : { kind: 'same', text: 'Vise 5 secondes de plus que la dernière fois.' };
   } else if (fail && failBefore) {
-    w = roundTo(top * 0.9, step);
+    w = roundLike(top, top * 0.9, step);
     reps = Array.from({ length: sets }, () => planned.min);
     tip = { kind: 'down', text: `Deux séances difficiles de suite : on repart à ${fmtWeight(w)} kg (−10 %) pour remonter proprement.` };
   } else if (allTop && (def?.increment ?? 1) === 0) {
@@ -149,7 +155,7 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
   }
 
   if (deload && !timed) {
-    w = roundTo(w * 0.9, step);
+    w = roundLike(w, w * 0.9, step);
     tip = { kind: 'deload', text: `Semaine légère : ${sets} séries à ${fmtWeight(w)} kg, sans aller à l’échec. Ton corps récupère et repart plus fort.` };
   }
 
@@ -167,7 +173,7 @@ export function autoAdjust(ex: SessionExercise, w: number, r: number): { w: numb
   const inc = def.increment > 0 ? def.increment : 0;
   if (inc === 0) return null;
   const step = inc >= 2.5 ? 2.5 : 1;
-  const round = (x: number) => Math.max(step, Math.round(x / step) * step);
+  const round = (x: number) => Math.max(step, roundLike(w, x, step));
   if (r >= max + 3) {
     const nw = round(w + 2 * inc);
     return { w: nw, r: min, text: `${r} reps, c’est bien trop facile : ${fmtWeight(nw)} kg sur la série suivante.` };

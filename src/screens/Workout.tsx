@@ -823,7 +823,6 @@ function SetEditor({ sid, session, edit, onClose }: { sid: string; session: Sess
   }, [edit?.ei, edit?.sj]);
 
   if (!ex || !edit) return <Sheet open={false} onClose={onClose} title="">{null}</Sheet>;
-  const step = def && def.increment >= 2.5 ? 2.5 : 1;
   const bar = getData<{ bar?: number }>('settings')?.bar ?? 20;
   const pl = def?.equipment === 'barre' ? platesFor(w, bar) : null;
 
@@ -846,15 +845,18 @@ function SetEditor({ sid, session, edit, onClose }: { sid: string; session: Sess
           <span className="small muted" style={{ fontWeight: 600 }}>
             Charge{def?.equipment === 'haltères' ? ' par haltère' : ''}
           </span>
-          <Stepper value={w} onChange={setW} step={step} unit="kg" format={fmtWeight} />
+          <Stepper value={w} onChange={setW} step={1} unit="kg" format={fmtWeight} typeable label="Charge en kilos" />
           <div className="row" style={{ gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-            {[-10, -5, 5, 10].map((d) => (
-              <button key={d} className="chip press" onClick={() => setW(Math.max(0, w + d))}>
+            {[-5, -2.5, 2.5, 5].map((d) => (
+              <button key={d} className="chip press" onClick={() => setW(Math.max(0, Math.round((w + d) * 100) / 100))}>
                 {d > 0 ? '+' : '−'}
-                {Math.abs(d)} kg
+                {fmtWeight(Math.abs(d))} kg
               </button>
             ))}
           </div>
+          <span className="tiny muted" style={{ textAlign: 'center' }}>
+            Touche le chiffre pour taper la charge exacte.
+          </span>
           {pl && w > bar && (
             <div className="small muted" style={{ textAlign: 'center' }}>
               De chaque côté : {pl.plates.length ? pl.plates.map(fmtWeight).join(' + ') + ' kg' : 'rien'}
@@ -949,7 +951,7 @@ function PlatesSheet({ session, index, onClose }: { session: Session; index: num
 
   return (
     <Sheet open={index !== null} onClose={onClose} title="Calcul des disques">
-      <Stepper value={w} onChange={setW} step={2.5} unit="kg" format={fmtWeight} min={bar} />
+      <Stepper value={w} onChange={setW} step={2.5} unit="kg" format={fmtWeight} min={bar} typeable label="Charge totale en kilos" />
       <div className="col" style={{ gap: 6 }}>
         <span className="small muted" style={{ fontWeight: 600 }}>
           Barre

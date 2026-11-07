@@ -37,7 +37,7 @@ export default function WeighInSheet({ open, onClose }: { open: boolean; onClose
       <p className="small muted" style={{ margin: 0 }}>
         Le matin, à jeun, après être passé aux toilettes. Élan lisse les variations avec la moyenne sur 7 jours.
       </p>
-      <Stepper value={kg} onChange={setKg} step={0.1} unit="kg" format={(v) => fmtKg(v)} />
+      <Stepper value={kg} onChange={setKg} step={0.1} unit="kg" format={(v) => fmtKg(v)} typeable label="Poids en kilos" />
       <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
         {[-1, -0.5, 0.5, 1].map((d) => (
           <button key={d} className="chip press" onClick={() => setKg(Math.round((kg + d) * 10) / 10)}>

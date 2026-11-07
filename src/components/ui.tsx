@@ -350,6 +350,8 @@ export function Stepper({
   min = 0,
   unit,
   format,
+  typeable,
+  label,
 }: {
   value: number;
   onChange: (v: number) => void;
@@ -357,17 +359,50 @@ export function Stepper({
   min?: number;
   unit?: string;
   format?: (v: number) => string;
+  /** on peut toucher le chiffre et taper la valeur exacte */
+  typeable?: boolean;
+  label?: string;
 }) {
   const fix = (v: number) => Math.max(min, Math.round(v * 100) / 100);
+  const shown = format ? format(value) : String(value);
+  const [draft, setDraft] = useState<string | null>(null);
+  function commit() {
+    if (draft === null) return;
+    const v = parseFloat(draft.replace(',', '.').replace(/[^\d.]/g, ''));
+    if (Number.isFinite(v)) onChange(fix(v));
+    setDraft(null);
+  }
   return (
     <div className="stepper">
       <button className="press" aria-label={`Moins ${step}`} onClick={() => onChange(fix(value - step))}>
         <Icon name="minus" size={24} />
       </button>
-      <output aria-live="polite">
-        {format ? format(value) : value}
-        {unit && <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--ink2)', marginLeft: 4 }}>{unit}</span>}
-      </output>
+      {typeable ? (
+        <label className="stepper-type">
+          <input
+            inputMode="decimal"
+            enterKeyHint="done"
+            aria-label={label ?? 'Valeur'}
+            value={draft ?? shown}
+            size={Math.max(2, (draft ?? shown).length)}
+            onFocus={(e) => {
+              setDraft(shown);
+              requestAnimationFrame(() => e.target.select());
+            }}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            }}
+          />
+          {unit && <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--ink2)' }}>{unit}</span>}
+        </label>
+      ) : (
+        <output aria-live="polite">
+          {shown}
+          {unit && <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--ink2)', marginLeft: 4 }}>{unit}</span>}
+        </output>
+      )}
       <button className="press" aria-label={`Plus ${step}`} onClick={() => onChange(fix(value + step))}>
         <Icon name="plus" size={24} />
       </button>
