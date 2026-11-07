@@ -6,7 +6,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
 
 type Meal = { name: string; time: string; share: { p: number; g: number; l: number } };
-type Targets = { p: number; g: number; l: number; meals: Meal[]; water?: { goalMl: number; reminders: string[] }; off?: boolean };
+type Targets = { p: number; g: number; l: number; meals: Meal[]; water?: { goalMl: number; reminders: string[] }; off?: boolean; mealsOff?: Meal[] };
 type Sub = { endpoint: string; user_id: string; p256dh: string; auth: string; tz: string | null };
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -85,19 +85,20 @@ Deno.serve(async () => {
     let sent = 0;
     for (const user of users) {
       const t = docs?.find((d) => d.user_id === user)?.data as Targets | undefined;
-      if (!t?.meals?.length) continue;
+      if (!t) continue;
       const userSubs = subs.filter((s) => s.user_id === user);
       const { date, minutes } = localParts(userSubs[0].tz || 'Europe/Paris');
 
       // Suivi nutrition désactivé : seulement le rappel de pesée, à l'heure du premier repas
       if (t.off) {
-        const at = toMinutes(t.meals[0].time);
+        const at = toMinutes((t.mealsOff ?? t.meals)?.[0]?.time ?? '06:00');
         if (minutes < at || minutes > at + 5) continue;
         const key = `${date}:pesee`;
         if (!(await claim(user, key))) continue;
         sent += await push(userSubs, JSON.stringify({ title: 'Pesée du matin', body: 'À jeun, avant de boire : monte sur la balance et note ton poids.', tag: key, url: './' }));
         continue;
       }
+      if (!t.meals?.length) continue;
 
       for (let i = 0; i < t.meals.length; i++) {
         const meal = t.meals[i];

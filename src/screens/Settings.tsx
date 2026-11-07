@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { closeStore, getData, putDoc, useStoreVersion } from '../lib/store';
 import { lastSyncAt, syncNow, useSyncStatus } from '../lib/sync';
 import { dayKey, hhmm, WEEKDAYS } from '../lib/dates';
-import { computeTargets, GOALS, kcalOf, mealTarget, type Goal, type Meal, type Profile, type Targets } from '../lib/nutrition';
+import { computeTargets, GOALS, kcalOf, mealTarget, setNutrition, type Goal, type Meal, type Profile, type Targets } from '../lib/nutrition';
 import { ABS, abs, CATALOG, defaultRest, exName, fullBodyProgram, programFor, upperLowerProgram, type Program, type ProgramDay } from '../lib/program';
 import ProgramChooser from '../components/ProgramChooser';
 import { currentSubscription, disablePush, enablePush, pushSupported } from '../lib/push';
@@ -126,8 +126,8 @@ function MainPage({ go }: { go: (p: 'profile' | 'nutrition' | 'program' | 'watch
             <Toggle
               on={!targets.off}
               onChange={() => {
-                void putDoc('targets', 'targets', { ...targets, off: !targets.off });
-                showToast(targets.off ? 'Suivi nutrition réactivé' : 'Suivi nutrition désactivé');
+                void setNutrition(!!targets.off);
+                showToast(targets.off ? 'Suivi nutrition réactivé' : 'Suivi nutrition désactivé : plus de rappels de repas');
               }}
               label="Suivi nutrition"
             />

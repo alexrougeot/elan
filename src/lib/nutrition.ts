@@ -30,6 +30,8 @@ export type Targets = {
   water?: { goalMl: number; reminders: string[] };
   /** suivi nutrition désactivé : pas d'onglet, pas de rappels de repas ni d'eau (la pesée du matin reste) */
   off?: boolean;
+  /** repas mis de côté pendant que le suivi est désactivé (le serveur n'envoie alors aucun rappel de repas) */
+  mealsOff?: Meal[];
 };
 
 export type Macros = { k: number; p: number; g: number; l: number };
@@ -104,6 +106,18 @@ export function getTargets(): Targets | undefined {
 /** Suivi nutrition activé (par défaut oui) */
 export function nutritionOn() {
   return !getData<Targets>('targets')?.off;
+}
+
+/** Active ou coupe le suivi nutrition ; les repas sont gardés de côté et reviennent tels quels */
+export async function setNutrition(on: boolean) {
+  const t = getTargets();
+  if (!t) return;
+  if (on) {
+    const { mealsOff, ...rest } = t;
+    await putDoc('targets', 'targets', { ...rest, off: false, meals: t.meals.length ? t.meals : (mealsOff ?? []) });
+  } else {
+    await putDoc('targets', 'targets', { ...t, off: true, meals: [], mealsOff: t.meals.length ? t.meals : t.mealsOff });
+  }
 }
 
 export function kcalOf(m: { p: number; g: number; l: number }) {
