@@ -217,7 +217,7 @@ async function importWorkouts(userId: string, workouts: HaeWorkout[]) {
       const circuit = list.find((d) => d.kind === 'activity' && ['hyrox', 'circuit'].includes(String(d.data.type)));
       const match = kind === 'cardio' ? circuit ?? session : session ?? circuit;
       if (match?.kind === 'activity') {
-        const data = { ...match.data, kcal: kcal !== undefined ? Math.round(kcal) : match.data.kcal, hrAvg: heart.avg, hrMax: heart.max, hr, source };
+        const data = { ...match.data, kcal: kcal !== undefined ? Math.round(kcal) : match.data.kcal, hrAvg: heart.avg, hrMax: heart.max, hr, watchStart: start.toISOString(), source };
         await admin.from('docs').upsert({ user_id: userId, id: match.id, kind: 'activity', data, updated_at: now, deleted: false }, { onConflict: 'user_id,id' });
         imported++;
         lines.push(`${name} rattaché`);

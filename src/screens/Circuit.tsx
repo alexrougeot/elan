@@ -3,16 +3,26 @@ import { useEffect, useRef, useState } from 'react';
 import { getData, getDoc, putDoc, removeDoc } from '../lib/store';
 import { dayKey, shortDate } from '../lib/dates';
 import type { Profile } from '../lib/nutrition';
-import { activities, chrono, circuitScore, saveActivity, type Activity } from '../lib/activity';
-import { circuitFor, FORMATS, itemText, qtyText, weekIndex, type CircuitFormat, type CircuitPlan } from '../lib/conditioning';
+import { activities, chrono, circuitScore, deleteActivity, saveActivity, type Activity } from '../lib/activity';
+import { circuitFor, FORMATS, itemText, kbFor, kbText, KB_FORMATS, KB_WEIGHTS, qtyText, weekIndex, type CircuitFormat, type CircuitPlan, type Item } from '../lib/conditioning';
+import { circuitRecord, newRecordText } from '../lib/records';
+import { ActivityWatch } from '../components/WatchCard';
 import { haptic, keepScreenOn, tone, unlockAudio } from '../lib/device';
 import { HeroLeaves, Icon, Sheet, Stepper, showToast, useNow } from '../components/ui';
 
 const ORDER: CircuitFormat[] = ['enchainement', 'emom', 'amrap'];
+export type CircuitKind = 'hyrox' | 'kb';
+
+const isKb = (p?: CircuitPlan) => p?.kind === 'kb';
+/** Texte d'un poste, kettlebell ou type Hyrox */
+const moveText = (p: CircuitPlan, i: Item) => (isKb(p) ? kbText(i) : i.unit === 'reps' ? `${i.qty} ${i.name.toLowerCase()}` : `${i.name} · ${qtyText(i)}`);
+const nextText = (p: CircuitPlan, i: Item) => (isKb(p) ? kbText(i) : i.run ? `course de ${qtyText(i)}` : itemText(i));
+/** Enchaînement ou WOD : on chronomètre chaque segment */
+const timed = (p: CircuitPlan) => p.format === 'enchainement' || p.format === 'wod';
 const PHASES = ['Cette semaine : on démarre un nouveau cycle.', 'Cette semaine : un peu plus de volume.', 'Cette semaine : la plus dure du cycle.', 'Cette semaine : plus légère, pour récupérer.'];
 
-function lastOf(format: CircuitFormat) {
-  return activities().find((a) => a.data.type === 'circuit' && a.data.plan?.format === format);
+function lastOf(format: CircuitFormat, kind: CircuitKind) {
+  return activities().find((a) => a.data.type === 'circuit' && a.data.plan?.format === format && (a.data.plan?.kind === 'kb') === (kind === 'kb'));
 }
 
 function PlanList({ plan, compact }: { plan: CircuitPlan; compact?: boolean }) {
@@ -32,7 +42,7 @@ function PlanList({ plan, compact }: { plan: CircuitPlan; compact?: boolean }) {
           </span>
           <div className="grow col" style={{ gap: 1, paddingTop: 3 }}>
             <span className="small" style={{ fontWeight: 650 }}>
-              {i.unit === 'reps' ? `${i.qty} ${i.name.toLowerCase()}` : `${i.name} · ${qtyText(i)}`}
+              {moveText(plan, i)}
               {i.load ? <span className="muted" style={{ fontWeight: 500 }}> · {i.load}</span> : null}
             </span>
             {!compact && i.alt && <span className="tiny muted">{i.alt}</span>}
@@ -43,14 +53,24 @@ function PlanList({ plan, compact }: { plan: CircuitPlan; compact?: boolean }) {
   );
 }
 
-export function CircuitStartSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CircuitStartSheet({ open, onClose, kind = 'hyrox' }: { open: boolean; onClose: () => void; kind?: CircuitKind }) {
   const profile = getData<Profile>('profile');
-  const [format, setFormat] = useState<CircuitFormat>('enchainement');
+  const settings = getData<{ kb?: number }>('settings') ?? {};
+  const kg = settings.kb ?? (profile?.sex === 'f' ? 12 : 16);
+  const kb = kind === 'kb';
+  const order = kb ? KB_FORMATS : ORDER;
+  const [format, setFormat] = useState<CircuitFormat>(order[0]);
   const [duo, setDuo] = useState(false);
   const week = weekIndex();
-  const plans = Object.fromEntries(ORDER.map((f) => [f, circuitFor(f, week, profile?.sex, duo)])) as Record<CircuitFormat, CircuitPlan>;
-  const plan = plans[format];
-  const last = lastOf(format);
+  const plans = Object.fromEntries(order.map((f) => [f, kb ? kbFor(f as 'amrap' | 'emom' | 'wod', week, kg) : circuitFor(f, week, profile?.sex, duo)])) as Record<CircuitFormat, CircuitPlan>;
+  const fmt = order.includes(format) ? format : order[0];
+  const plan = plans[fmt];
+  const last = lastOf(fmt, kind);
+  const best = circuitRecord(fmt, kind);
+
+  useEffect(() => {
+    if (open) setFormat((f) => (order.includes(f) ? f : order[0]));
+  }, [open, kind]);
 
   async function go() {
     unlockAudio();
@@ -61,14 +81,14 @@ export function CircuitStartSheet({ open, onClose }: { open: boolean; onClose: (
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="Séance type Hyrox">
+    <Sheet open={open} onClose={onClose} title={kb ? 'Kettlebell · 25 min' : 'Séance type Hyrox'}>
       <p className="small muted" style={{ margin: 0 }}>
-        Trois formats au choix. Le contenu change chaque lundi. {PHASES[((week % 4) + 4) % 4]}
+        Trois formats au choix. Le contenu change chaque lundi, que tu l’aies fait ou non. {PHASES[((week % 4) + 4) % 4]}
       </p>
       <div className="col" style={{ gap: 8 }} role="radiogroup" aria-label="Format">
-        {ORDER.map((f) => {
+        {order.map((f) => {
           const p = plans[f];
-          const on = f === format;
+          const on = f === fmt;
           return (
             <button
               key={f}
@@ -80,24 +100,39 @@ export function CircuitStartSheet({ open, onClose }: { open: boolean; onClose: (
             >
               <span className="row between">
                 <span style={{ fontWeight: 700, fontSize: 17, color: on ? 'var(--brand-deep)' : undefined }}>{FORMATS[f].name}</span>
-                <span className="badge gray">{f === 'enchainement' ? `≈ ${p.minutes} min` : `${p.minutes} min`}</span>
+                <span className="badge gray">{f === 'enchainement' ? `≈ ${p.minutes} min` : f === 'wod' ? '25 min max' : `${p.minutes} min`}</span>
               </span>
               <span className="small" style={{ color: on ? 'var(--brand-deep)' : 'var(--ink2)' }}>
-                {FORMATS[f].short}
+                {kb && f === 'emom' ? '5 postes, une minute chacun, 5 tours' : FORMATS[f].short}
               </span>
             </button>
           );
         })}
       </div>
 
-      <div className="segmented" role="group" aria-label="Seul ou à deux">
-        <button aria-pressed={!duo} onClick={() => setDuo(false)}>
-          Seul
-        </button>
-        <button aria-pressed={duo} onClick={() => setDuo(true)}>
-          À deux
-        </button>
-      </div>
+      {kb ? (
+        <div className="col" style={{ gap: 6 }}>
+          <span className="small muted" style={{ fontWeight: 600 }}>
+            Ta kettlebell
+          </span>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }} role="radiogroup" aria-label="Poids de la kettlebell">
+            {KB_WEIGHTS.map((w) => (
+              <button key={w} role="radio" aria-checked={w === kg} className={'chip press' + (w === kg ? ' on' : '')} onClick={() => void putDoc('settings', 'settings', { ...settings, kb: w })}>
+                {w} kg
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="segmented" role="group" aria-label="Seul ou à deux">
+          <button aria-pressed={!duo} onClick={() => setDuo(false)}>
+            Seul
+          </button>
+          <button aria-pressed={duo} onClick={() => setDuo(true)}>
+            À deux
+          </button>
+        </div>
+      )}
 
       <div className="card col" style={{ gap: 12 }}>
         <div className="col" style={{ gap: 2 }}>
@@ -115,7 +150,13 @@ export function CircuitStartSheet({ open, onClose }: { open: boolean; onClose: (
       {last && (
         <div className="row small muted" style={{ gap: 8 }}>
           <Icon name="calendar" size={17} />
-          Dernière fois en {format === 'enchainement' ? 'enchaînement' : FORMATS[format].name} ({shortDate(last.data.date)}) : {circuitScore(last.data)}
+          Dernière fois en {fmt === 'enchainement' ? 'enchaînement' : FORMATS[fmt].name} ({shortDate(last.data.date)}) : {circuitScore(last.data)}
+        </div>
+      )}
+      {best && (
+        <div className="row small" style={{ gap: 8, color: 'var(--brand-ink)', fontWeight: 600 }}>
+          <Icon name="trophy" size={17} />
+          Ton record en {FORMATS[fmt].name} : {best.text} ({shortDate(best.date)})
         </div>
       )}
 
@@ -145,14 +186,14 @@ export function CircuitView({ id }: { id: string }) {
     <main className="screen">
       <header className="screen-head">
         <div className="col" style={{ gap: 2 }}>
-          <span className="eyebrow">{a.duo ? 'Type Hyrox · à deux' : 'Type Hyrox'}</span>
+          <span className="eyebrow">{isKb(plan) ? `Kettlebell · ${plan.kg} kg` : a.duo ? 'Type Hyrox · à deux' : 'Type Hyrox'}</span>
           <h1 className="title">{plan.name}</h1>
         </div>
         <button className="btn small ghost press" onClick={() => setFinish(true)}>
           Arrêter
         </button>
       </header>
-      {plan.format === 'enchainement' && <Chain id={id} a={a} elapsed={elapsed} onDone={() => setFinish(true)} />}
+      {timed(plan) && <Chain id={id} a={a} elapsed={elapsed} onDone={() => setFinish(true)} />}
       {plan.format === 'emom' && <Emom id={id} a={a} elapsed={elapsed} onDone={() => setFinish(true)} />}
       {plan.format === 'amrap' && <Amrap id={id} a={a} elapsed={elapsed} onDone={() => setFinish(true)} />}
       <CircuitFinish id={id} a={a} elapsed={elapsed} open={finish} onClose={() => setFinish(false)} />
@@ -184,18 +225,18 @@ function Hero({ big, chip, bars, children }: { big: string; chip?: string; bars:
   );
 }
 
-function MoveCard({ label, item, right, children }: { label: string; item: CircuitPlan['items'][number]; right?: string; children?: React.ReactNode }) {
+function MoveCard({ label, item, plan, right, children }: { label: string; item: CircuitPlan['items'][number]; plan: CircuitPlan; right?: string; children?: React.ReactNode }) {
   return (
     <section className="card col" style={{ gap: 12 }}>
       <div className="row">
         <span className={'tile ' + (item.run ? 'tint-sky' : 'tint-orange')}>
-          <Icon name={item.run ? 'run' : 'bolt'} />
+          <Icon name={item.run ? 'run' : isKb(plan) ? 'kettlebell' : 'bolt'} />
         </span>
         <div className="grow col" style={{ gap: 1 }}>
           <span className="tiny muted" style={{ fontWeight: 500 }}>
             {label}
           </span>
-          <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em' }}>{item.unit === 'reps' ? `${item.qty} ${item.name.toLowerCase()}` : `${item.name} · ${qtyText(item)}`}</span>
+          <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em' }}>{moveText(plan, item)}</span>
         </div>
         {right && (
           <span className="big-num" style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -224,7 +265,9 @@ function Chain({ id, a, elapsed, onDone }: Part) {
   const cur = plan.items[idx];
   const next = plan.items[idx + 1];
   const finished = idx >= plan.items.length;
+  const kb = isKb(plan);
   const tour = Math.floor(Math.min(idx, plan.items.length - 1) / 2) + 1;
+  const capLeft = plan.minutes * 60 - elapsed;
 
   async function mark() {
     haptic();
@@ -238,14 +281,20 @@ function Chain({ id, a, elapsed, onDone }: Part) {
 
   return (
     <>
-      <Hero big={chrono(finished ? doneSum : elapsed)} chip={`Tour ${tour} sur ${plan.rounds}`} bars={plan.items.map((_, i) => (i < idx ? 'done' : i === idx ? 'now' : 'todo'))} />
+      <Hero big={chrono(finished ? doneSum : elapsed)} chip={kb ? `Bloc ${Math.min(idx + 1, plan.items.length)} sur ${plan.items.length}` : `Tour ${tour} sur ${plan.rounds}`} bars={plan.items.map((_, i) => (i < idx ? 'done' : i === idx ? 'now' : 'todo'))}>
+        {kb && !finished && (
+          <span className="small on-hero-2" style={{ color: capLeft < 0 ? '#FCD34D' : undefined }}>
+            {capLeft >= 0 ? `Temps limite dans ${chrono(capLeft)}` : 'Temps limite dépassé : finis quand même, ton temps compte.'}
+          </span>
+        )}
+      </Hero>
       {cur && (
-        <MoveCard label={cur.run ? `Course · tour ${tour}` : `Station · tour ${tour}`} item={cur} right={chrono(segElapsed)}>
+        <MoveCard plan={plan} label={kb ? `Bloc ${idx + 1}` : cur.run ? `Course · tour ${tour}` : `Station · tour ${tour}`} item={cur} right={chrono(segElapsed)}>
           <button className="btn brand press" style={{ minHeight: 64, fontSize: 19 }} onClick={mark}>
             <Icon name="check" size={24} stroke={2.6} />
             {idx === plan.items.length - 1 ? 'Terminé !' : 'Fait, on enchaîne'}
           </button>
-          {next && <span className="small muted">Ensuite : {next.run ? `course de ${qtyText(next)}` : itemText(next)}</span>}
+          {next && <span className="small muted">Ensuite : {nextText(plan, next)}</span>}
         </MoveCard>
       )}
       {idx > 0 && (
@@ -257,10 +306,10 @@ function Chain({ id, a, elapsed, onDone }: Part) {
               <div key={i}>
                 <div className="list-row">
                   <span className={'tile sm ' + (s.run ? 'tint-sky' : 'tint-orange')}>
-                    <Icon name={s.run ? 'run' : 'bolt'} size={17} />
+                    <Icon name={s.run ? 'run' : kb ? 'kettlebell' : 'bolt'} size={17} />
                   </span>
                   <span className="grow" style={{ fontWeight: 600 }}>
-                    {s.run ? `Course ${Math.floor(i / 2) + 1}` : s.name}
+                    {s.run ? `Course ${Math.floor(i / 2) + 1}` : kb ? kbText(s) : s.name}
                   </span>
                   <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{chrono(t)}</span>
                 </div>
@@ -331,11 +380,11 @@ function Emom({ id, a, elapsed, onDone }: Part) {
       >
         <span className="small on-hero-2">Total : {chrono(elapsed)} · poste {(m % plan.items.length) + 1} sur {plan.items.length}</span>
       </Hero>
-      <MoveCard label={`Cette minute`} item={cur}>
+      <MoveCard plan={plan} label={`Cette minute`} item={cur}>
         <button className={'btn press ' + (missed.has(m + 1) ? 'danger' : 'ghost')} onClick={toggleMiss}>
           {missed.has(m + 1) ? 'Minute ratée (toucher pour annuler)' : 'Je n’ai pas fini les reps'}
         </button>
-        <span className="small muted">Minute suivante : {next.run ? `course de ${qtyText(next)}` : itemText(next)}</span>
+        <span className="small muted">Minute suivante : {nextText(plan, next)}</span>
       </MoveCard>
       <section className="card col" style={{ gap: 10 }}>
         <span className="small muted" style={{ fontWeight: 600 }}>
@@ -404,16 +453,22 @@ function CircuitFinish({ id, a, elapsed, open, onClose }: { id: string; a: Activ
   const plan = a.plan!;
   const [rpe, setRpe] = useState(3);
   const [extra, setExtra] = useState(0);
-  const complete =
-    plan.format === 'enchainement' ? (a.splits?.length ?? 0) >= plan.items.length : elapsed >= plan.minutes * 60;
-  const total = plan.format === 'enchainement' ? (complete ? (a.splits ?? []).reduce((x, y) => x + y, 0) : elapsed) : Math.min(elapsed, plan.minutes * 60);
+  const complete = timed(plan) ? (a.splits?.length ?? 0) >= plan.items.length : elapsed >= plan.minutes * 60;
+  const total = timed(plan) ? (complete ? (a.splits ?? []).reduce((x, y) => x + y, 0) : elapsed) : Math.min(elapsed, plan.minutes * 60);
   const done: Activity = { ...a, extra: plan.format === 'amrap' ? extra : undefined };
 
   async function save() {
     haptic();
-    await putDoc(id, 'activity', { ...done, endedAt: new Date().toISOString(), minutes: Math.max(1, Math.round(total / 60)), rpe });
+    const kind: CircuitKind = isKb(plan) ? 'kb' : 'hyrox';
+    const before = circuitRecord(plan.format, kind);
+    const final = { ...done, endedAt: new Date().toISOString(), minutes: Math.max(1, Math.round(total / 60)), rpe };
+    await putDoc(id, 'activity', final);
     void keepScreenOn(false);
-    showToast(`Séance terminée : ${circuitScore(done)}. Bien joué !`);
+    const rec = complete ? newRecordText(before, final) : null;
+    if (rec) {
+      tone('end');
+      showToast(rec, undefined, 7000);
+    } else showToast(`Séance terminée : ${circuitScore(done)}. Bien joué !`);
   }
 
   async function drop() {
@@ -424,9 +479,13 @@ function CircuitFinish({ id, a, elapsed, open, onClose }: { id: string; a: Activ
   return (
     <Sheet open={open} onClose={complete ? () => undefined : onClose} title={complete ? 'Séance terminée' : 'Arrêter la séance ?'}>
       <div className="card col" style={{ gap: 2, background: complete ? 'var(--brand-tint)' : 'var(--card2)', boxShadow: 'none' }}>
-        <span className="tiny muted">{plan.format === 'enchainement' ? 'Temps total' : plan.format === 'emom' ? 'Minutes réussies' : 'Tours'}</span>
-        <span className="big-num">{plan.format === 'enchainement' ? chrono(total) : circuitScore(done)}</span>
-        <span className="small muted">{plan.name}{a.duo ? ' · à deux' : ''}</span>
+        <span className="tiny muted">{timed(plan) ? 'Temps total' : plan.format === 'emom' ? 'Minutes réussies' : 'Tours'}</span>
+        <span className="big-num">{timed(plan) ? chrono(total) : circuitScore(done)}</span>
+        <span className="small muted">
+          {plan.name}
+          {isKb(plan) ? ` · ${plan.kg} kg` : ''}
+          {a.duo ? ' · à deux' : ''}
+        </span>
       </div>
       {plan.format === 'amrap' && (
         <div className="col" style={{ gap: 6 }}>
@@ -460,6 +519,92 @@ function CircuitFinish({ id, a, elapsed, open, onClose }: { id: string; a: Activ
           <button className="btn danger press" onClick={drop}>
             Abandonner sans enregistrer
           </button>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+// ---------------- Résultat d'une séance passée ----------------
+export function CircuitResultSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const a = id ? getDoc<Activity>(id)?.data : undefined;
+  const [confirm, setConfirm] = useState(false);
+  const plan = a?.plan;
+  const kind: CircuitKind = isKb(plan) ? 'kb' : 'hyrox';
+  const best = plan ? circuitRecord(plan.format, kind) : null;
+  const isBest = !!(best && id && best.id === id);
+
+  useEffect(() => {
+    if (id) setConfirm(false);
+  }, [id]);
+
+  return (
+    <Sheet open={!!id && !!a} onClose={onClose} title={plan ? plan.name : 'Séance'}>
+      {a && plan && (
+        <>
+          <span className="small muted">
+            {shortDate(a.date)} · {isKb(plan) ? `Kettlebell ${plan.kg} kg` : 'Type Hyrox'}
+            {a.duo ? ' · à deux' : ''}
+          </span>
+          <div className="card col" style={{ gap: 2, background: isBest ? 'var(--brand-tint)' : 'var(--card2)', boxShadow: 'none' }}>
+            <span className="tiny muted">{timed(plan) ? 'Temps total' : plan.format === 'emom' ? 'Minutes réussies' : 'Score'}</span>
+            <span className="big-num">{circuitScore(a)}</span>
+            {isBest && (
+              <span className="row small" style={{ gap: 6, color: 'var(--brand-ink)', fontWeight: 700 }}>
+                <Icon name="trophy" size={16} />
+                Ton record en {FORMATS[plan.format].name}
+              </span>
+            )}
+          </div>
+          <ActivityWatch a={a} />
+          {timed(plan) && (a.splits?.length ?? 0) > 0 && (
+            <section className="card tight" style={{ background: 'var(--card2)', boxShadow: 'none' }}>
+              {(a.splits ?? []).map((t, i, arr) => {
+                const it = plan.items[i];
+                return (
+                  <div key={i}>
+                    <div className="list-row">
+                      <span className="grow small" style={{ fontWeight: 600 }}>
+                        {it?.run ? `Course ${Math.floor(i / 2) + 1}` : it ? moveText(plan, it) : `Bloc ${i + 1}`}
+                      </span>
+                      <span className="small" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                        {chrono(t)}
+                      </span>
+                    </div>
+                    {i < arr.length - 1 && <div className="divider" />}
+                  </div>
+                );
+              })}
+            </section>
+          )}
+          {!timed(plan) && (
+            <section className="card col" style={{ gap: 10, background: 'var(--card2)', boxShadow: 'none' }}>
+              <PlanList plan={plan} compact />
+            </section>
+          )}
+          {confirm ? (
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn ghost press grow" onClick={() => setConfirm(false)}>
+                Garder
+              </button>
+              <button
+                className="btn danger press grow"
+                onClick={async () => {
+                  const prev = a;
+                  await deleteActivity(id!);
+                  onClose();
+                  showToast('Séance supprimée', { label: 'Annuler', run: () => void putDoc(id!, 'activity', prev) });
+                }}
+              >
+                Supprimer
+              </button>
+            </div>
+          ) : (
+            <button className="btn ghost press" onClick={() => setConfirm(true)}>
+              <Icon name="trash" size={18} />
+              Supprimer cette séance
+            </button>
+          )}
         </>
       )}
     </Sheet>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Tab } from '../App';
 import { getData, useStoreVersion } from '../lib/store';
 import { addDays, dayKey, fmtKg, fmtNum, hhmm, longDate, minutesOf, nowMinutes, parseDay, weekStart, weekday } from '../lib/dates';
-import { currentWeight, entryMacros, foodsOn, getTargets, isSunday, mealTarget, runWeeklyAdjustment, sum, totalsOn, undoAdjustment, type Profile } from '../lib/nutrition';
+import { currentWeight, entryMacros, foodsOn, getTargets, isSunday, mealTarget, nutritionOn, runWeeklyAdjustment, sum, totalsOn, undoAdjustment, type Profile } from '../lib/nutrition';
 import { estimateMinutes, exName } from '../lib/program';
 import { activeSession, extraFor, getMoves, getProgram, planFor, sessionToday, undoSkip, usualPlan } from '../lib/workout';
 import SkipSheet from '../components/SkipSheet';
@@ -11,7 +11,8 @@ import { useSyncStatus } from '../lib/sync';
 import { getLink, healthForSession, healthLine, healthOn } from '../lib/health';
 import { checkWatch } from '../components/WatchCard';
 import { addWater, GLASS, WATER_REMINDERS, waterGoal, waterOn } from '../lib/water';
-import { ACTIVITY, activities, activitiesOn, activityKcal, activityLine, askCircuit, dayBonus } from '../lib/activity';
+import { actIcon, actLabel, activities, activitiesOn, activityKcal, activityLine, askCircuit, dayBonus } from '../lib/activity';
+import { CircuitResultSheet } from './Circuit';
 import ActivitySheet, { bonusFood } from '../components/ActivitySheet';
 import { fetchRun, openRun } from './Runs';
 import { haptic } from '../lib/device';
@@ -19,6 +20,8 @@ import { putDoc } from '../lib/store';
 import { HeroLeaves, Icon, LogoMark, Ring, mealVisual, showToast } from '../components/ui';
 import WeighInSheet from '../components/WeighIn';
 import WeeklyReview from '../components/WeeklyReview';
+import { WeightHero } from '../components/WeightCharts';
+import RecordsBanner from '../components/RecordsBanner';
 
 function greeting() {
   const h = new Date().getHours();
@@ -32,6 +35,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   const today = dayKey();
   const profile = getData<Profile>('profile')!;
   const targets = getTargets();
+  const food = nutritionOn();
   const program = getProgram();
   const plan = planFor(program);
   const extra = extraFor(program);
@@ -45,6 +49,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   const [review, setReview] = useState(false);
   const [actOpen, setActOpen] = useState(false);
   const [skipOpen, setSkipOpen] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
   const moves = getMoves();
   const usual = usualPlan(program);
   const skipped = !plan && !!usual && moves[today] === null && !sessionToday(usual.id);
@@ -55,10 +60,11 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
   // objectif d'hydratation enregistré pour les rappels
   useEffect(() => {
     const t = getTargets();
-    if (t && !t.water) void putDoc('targets', 'targets', { ...t, water: { goalMl: waterGoal(profile), reminders: WATER_REMINDERS } });
+    if (t && !t.off && !t.water) void putDoc('targets', 'targets', { ...t, water: { goalMl: waterGoal(profile), reminders: WATER_REMINDERS } });
   }, []);
 
   useEffect(() => {
+    if (!nutritionOn()) return;
     runWeeklyAdjustment(profile).then((adj) => {
       if (!adj) return;
       const t = getTargets();
@@ -138,8 +144,12 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         </div>
       )}
 
+      {/* Sans suivi nutrition : le poids en carte héros */}
+      {!food && <WeightHero onWeigh={() => setWeighIn(true)} onOpen={() => go('progress')} />}
+      <RecordsBanner go={go} />
+
       {/* Calories : la carte héros */}
-      {dayTargets && (
+      {food && dayTargets && (
         <button className="hero press col" style={{ border: 'none', textAlign: 'left', gap: 14 }} onClick={() => go('nutrition')}>
           <HeroLeaves />
           <div className="row between">
@@ -249,21 +259,33 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         )}
         {!plan && !active && weekend && todayActs.length === 0 && (
           <>
-            <span className="small muted">Week-end : une course, une séance type Hyrox à la salle, ou du repos. Tout compte.</span>
-            <div className="fields-2">
-              <button className="btn soft press" onClick={fetchRun}>
-                <Icon name="run" size={19} />
+            <span className="small muted">Week-end : une course, une séance type Hyrox, de la kettlebell à la maison, ou du repos. Tout compte.</span>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn soft press grow" style={{ paddingInline: 6, fontSize: 15, gap: 5 }} onClick={fetchRun}>
+                <Icon name="run" size={17} />
                 Course
               </button>
               <button
-                className="btn soft press"
+                className="btn soft press grow"
+                style={{ paddingInline: 6, fontSize: 15, gap: 5 }}
                 onClick={() => {
-                  askCircuit();
+                  askCircuit('hyrox');
                   go('workout');
                 }}
               >
-                <Icon name="bolt" size={19} />
+                <Icon name="bolt" size={17} />
                 Hyrox
+              </button>
+              <button
+                className="btn soft press grow"
+                style={{ paddingInline: 6, fontSize: 15, gap: 5 }}
+                onClick={() => {
+                  askCircuit('kb');
+                  go('workout');
+                }}
+              >
+                <Icon name="kettlebell" size={17} />
+                Kettlebell
               </button>
             </div>
           </>
@@ -311,19 +333,19 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         return (
           <section
             key={a.id}
-            className={'card col' + (a.data.type === 'course' ? ' press' : '')}
+            className={'card col' + (a.data.type === 'course' || a.data.type === 'circuit' ? ' press' : '')}
             style={{ gap: 10 }}
-            role={a.data.type === 'course' ? 'button' : undefined}
-            tabIndex={a.data.type === 'course' ? 0 : undefined}
-            onClick={a.data.type === 'course' ? () => openRun(a.id) : undefined}
+            role={a.data.type === 'course' || a.data.type === 'circuit' ? 'button' : undefined}
+            tabIndex={a.data.type === 'course' || a.data.type === 'circuit' ? 0 : undefined}
+            onClick={a.data.type === 'course' ? () => openRun(a.id) : a.data.type === 'circuit' ? () => setResult(a.id) : undefined}
           >
             <div className="row">
               <span className={'tile ' + (a.data.type === 'circuit' ? 'tint-orange' : 'tint-sky')}>
-                <Icon name={ACTIVITY[a.data.type].icon} />
+                <Icon name={actIcon(a.data)} />
               </span>
               <div className="grow col" style={{ gap: 2 }}>
                 <span className="tiny muted" style={{ fontWeight: 500 }}>
-                  {ACTIVITY[a.data.type].label} du jour
+                  {actLabel(a.data)} du jour
                 </span>
                 <span style={{ fontWeight: 700 }}>{activityLine(a.data)}</span>
               </div>
@@ -332,12 +354,12 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
                 <span className="tiny muted">{fromWatch ? 'montre' : 'estimé'}</span>
               </span>
             </div>
-            {ai === 0 && extraBurn.bonus === 0 && profile.goal === 'seche' && (
+            {food && ai === 0 && extraBurn.bonus === 0 && profile.goal === 'seche' && (
               <span className="small" style={{ color: 'var(--brand-deep)', background: 'var(--brand-tint)', padding: '10px 12px', borderRadius: 14, lineHeight: 1.45 }}>
                 En sèche, pas besoin de remanger ces calories : elles accélèrent ta perte. Garde bien tes protéines.
               </span>
             )}
-            {bonus > 0 && dayTargets && (
+            {food && bonus > 0 && dayTargets && (
               <span className="small" style={{ color: 'var(--orange-ink)', background: 'var(--orange-tint)', padding: '10px 12px', borderRadius: 14, lineHeight: 1.45 }}>
                 Ton objectif du jour passe à {fmtNum(dayTargets.kcal)} kcal (+{bonus} en glucides), pour ne pas freiner ta prise de masse. Par exemple : {bonusFood(bonus)}.
               </span>
@@ -358,7 +380,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
                 Activité du jour · {h.source}
               </span>
               <span style={{ fontWeight: 700 }}>{healthLine(h)}</span>
-              {todayActs.length === 0 && extraBurn.bonus > 0 && (
+              {food && todayActs.length === 0 && extraBurn.bonus > 0 && (
                 <span className="small" style={{ color: 'var(--orange-ink)' }}>
                   +{extraBurn.bonus} kcal ajoutées à ton objectif du jour
                 </span>
@@ -390,7 +412,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
       )}
 
       {/* Prochain repas */}
-      {targets && next >= 0 && nextTarget && (
+      {food && targets && next >= 0 && nextTarget && (
         <button
           className="card press col"
           style={{ border: 'none', textAlign: 'left', gap: 10, background: 'var(--feature)', color: 'var(--feature-ink)', boxShadow: 'none', position: 'relative', overflow: 'hidden' }}
@@ -425,7 +447,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
       )}
 
       {/* Poids */}
-      <section className="card col" style={{ gap: 12 }}>
+      {food && <section className="card col" style={{ gap: 12 }}>
         <div className="row">
           <span className="tile tint-sky">
             <Icon name="scale" />
@@ -458,10 +480,10 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
             {weightToday ? 'Modifier' : 'Me peser'}
           </button>
         </div>
-      </section>
+      </section>}
 
       {/* Hydratation */}
-      {(() => {
+      {food && (() => {
         const goal = waterGoal(profile, targets);
         const ml = waterOn(today);
         const glasses = Math.round(goal / GLASS);
@@ -504,7 +526,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
         );
       })()}
 
-      {isSunday() && (
+      {food && isSunday() && (
         <button className="card press row" style={{ border: 'none', textAlign: 'left' }} onClick={() => setReview(true)}>
           <span className="tile tint-violet">
             <Icon name="flag" />
@@ -521,6 +543,7 @@ export default function Today({ go, openSettings }: { go: (t: Tab) => void; open
       <WeeklyReview open={review} onClose={() => setReview(false)} />
       <ActivitySheet open={actOpen} onClose={() => setActOpen(false)} initial={skipped ? 'cours' : undefined} duoDefault={skipped} />
       <SkipSheet open={skipOpen} onClose={() => setSkipOpen(false)} />
+      <CircuitResultSheet id={result} onClose={() => setResult(null)} />
     </main>
   );
 }

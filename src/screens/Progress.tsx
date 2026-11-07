@@ -9,7 +9,11 @@ import { compressImage, haptic } from '../lib/device';
 import { HeroLeaves, Icon, Sheet, showToast } from '../components/ui';
 import WeighInSheet from '../components/WeighIn';
 import WeeklyReview from '../components/WeeklyReview';
-import { activities, circuitScore, durationSec, paceSec, paceText, runs } from '../lib/activity';
+import { WeightPeriods } from '../components/WeightCharts';
+import { actIcon, activities, circuitScore, durationSec, paceSec, paceText, runs } from '../lib/activity';
+import { RecordsView } from './Records';
+import { CircuitResultSheet } from './Circuit';
+import { nutritionOn } from '../lib/nutrition';
 import { fetchRun, openRun, PaceTrend } from './Runs';
 
 type Measure = { date: string; waist?: number; hips?: number; chest?: number; arm?: number; thigh?: number; photo?: string };
@@ -23,7 +27,8 @@ const MEASURES: { key: keyof Measure; label: string }[] = [
 
 export default function Progress() {
   useStoreVersion();
-  const [tab, setTab] = useState<'poids' | 'force' | 'cardio' | 'corps'>('poids');
+  const [tab, setTab] = useState<'poids' | 'force' | 'cardio' | 'corps' | 'records'>('poids');
+  const food = nutritionOn();
   const [review, setReview] = useState(false);
 
   return (
@@ -48,11 +53,17 @@ export default function Progress() {
         <button aria-pressed={tab === 'corps'} onClick={() => setTab('corps')}>
           Corps
         </button>
+        {food && (
+          <button aria-pressed={tab === 'records'} onClick={() => setTab('records')}>
+            Records
+          </button>
+        )}
       </div>
       {tab === 'poids' && <WeightView />}
       {tab === 'force' && <StrengthView />}
       {tab === 'cardio' && <CardioView />}
       {tab === 'corps' && <BodyView />}
+      {tab === 'records' && food && <RecordsView />}
       <WeeklyReview open={review} onClose={() => setReview(false)} />
     </main>
   );
@@ -76,16 +87,6 @@ function WeightView() {
   const usedRate = realRate !== undefined && Math.sign(realRate) === Math.sign(toGo) && Math.abs(realRate) > 0.05 ? Math.abs(realRate) : rate;
   const arrival = profile.goal !== 'maintien' ? eta(current, profile.goalWeight, usedRate) : null;
   const progress = profile.goalWeight !== profile.weight ? Math.max(0, Math.min(1, (current - profile.weight) / (profile.goalWeight - profile.weight))) : 0;
-
-  const weeks = useMemo(() => {
-    const out: { monday: string; avg?: number }[] = [];
-    let m = weekStart(today);
-    for (let i = 0; i < 8; i++) {
-      out.push({ monday: m, avg: weekAvg(m, list) });
-      m = addDays(m, -7);
-    }
-    return out.filter((w) => w.avg !== undefined);
-  }, [list.length, today]);
 
   return (
     <>
@@ -118,57 +119,16 @@ function WeightView() {
         </section>
       )}
 
-      <section className="card col" style={{ gap: 10 }}>
-        <div className="row between">
-          <h2 className="h2">Ta courbe</h2>
-          <button className="btn small soft press" onClick={() => setWeigh(true)}>
-            <Icon name="scale" size={18} />
-            Me peser
-          </button>
-        </div>
-        <WeightChart profile={profile} arrival={arrival} />
-        <div className="row tiny muted" style={{ gap: 14 }}>
-          <span className="row" style={{ gap: 5 }}>
-            <span className="sync-dot" style={{ background: 'var(--brand)', opacity: 0.45 }} />
-            Pesées
-          </span>
-          <span className="row" style={{ gap: 5 }}>
-            <span style={{ width: 14, height: 3, borderRadius: 2, background: 'var(--brand-ink)' }} />
-            Moyenne 7 jours
-          </span>
-          {profile.goal !== 'maintien' && (
-            <span className="row" style={{ gap: 5 }}>
-              <span style={{ width: 14, borderTop: '2px dashed var(--lime)' }} />
-              Projection
-            </span>
-          )}
-        </div>
-      </section>
+      <div className="row between" style={{ margin: '0 4px' }}>
+        <h2 className="h2">Ta courbe</h2>
+        <button className="btn small soft press" onClick={() => setWeigh(true)}>
+          <Icon name="scale" size={18} />
+          Me peser
+        </button>
+      </div>
+      <WeightPeriods />
 
-      {weeks.length > 0 && (
-        <section className="card tight">
-          {weeks.map((w, i) => {
-            const prev = weeks[i + 1]?.avg;
-            const d = prev !== undefined && w.avg !== undefined ? w.avg - prev : undefined;
-            return (
-              <div key={w.monday}>
-                <div className="list-row">
-                  <span className="grow small" style={{ fontWeight: 600 }}>
-                    Semaine du {shortDate(w.monday)}
-                  </span>
-                  <span className="small">{fmtKg(w.avg!)} kg</span>
-                  <span className="small" style={{ width: 64, textAlign: 'right', color: d === undefined ? 'var(--ink3)' : 'var(--ink2)' }}>
-                    {d === undefined ? '' : d.toLocaleString('fr-FR', { maximumFractionDigits: 1, minimumFractionDigits: 1, signDisplay: 'always' })}
-                  </span>
-                </div>
-                {i < weeks.length - 1 && <div className="divider" />}
-              </div>
-            );
-          })}
-        </section>
-      )}
-
-      {targets && targets.history.length > 0 && (
+      {targets && !targets.off && targets.history.length > 0 && (
         <section className="card col" style={{ gap: 8 }}>
           <h2 className="h2">Ajustements des calories</h2>
           {[...targets.history].reverse().slice(0, 6).map((h, ri) => {
@@ -195,81 +155,6 @@ function WeightView() {
 
       <WeighInSheet open={weigh} onClose={() => setWeigh(false)} />
     </>
-  );
-}
-
-function WeightChart({ profile, arrival }: { profile: Profile; arrival: Date | null }) {
-  const list = weighIns();
-  const W = 340;
-  const H = 170;
-  const padL = 30;
-  const padR = 10;
-  const padT = 12;
-  const padB = 22;
-  const today = dayKey();
-  const first = list[0]?.date ?? today;
-  const endKey = arrival ? dayKey(arrival) : addDays(today, 30);
-  const lastKey = endKey > addDays(today, 14) ? endKey : addDays(today, 14);
-  const span = Math.max(14, daysBetween(first, lastKey));
-  const values = [...list.map((x) => x.kg), profile.goal !== 'maintien' ? profile.goalWeight : profile.weight, profile.weight];
-  const min = Math.floor(Math.min(...values) - 1);
-  const max = Math.ceil(Math.max(...values) + 1);
-  const x = (k: string) => padL + (daysBetween(first, k) / span) * (W - padL - padR);
-  const y = (kg: number) => padT + (1 - (kg - min) / (max - min)) * (H - padT - padB);
-
-  const avgPts = list.map((w) => `${x(w.date).toFixed(1)},${y(avg7(w.date, list)!).toFixed(1)}`).join(' ');
-  const cur = currentWeight(profile) ?? profile.weight;
-  const ticks = [min, Math.round((min + max) / 2), max];
-  const months: { k: string; label: string }[] = [];
-  const d = parseDay(first);
-  d.setDate(1);
-  d.setMonth(d.getMonth() + 1);
-  while (dayKey(d) <= lastKey) {
-    months.push({ k: dayKey(d), label: d.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', '') });
-    d.setMonth(d.getMonth() + (span > 200 ? 2 : 1));
-  }
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`Courbe de poids, actuellement ${fmtKg(cur)} kilos`} style={{ display: 'block' }}>
-      <defs>
-        <linearGradient id="elan-area" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#10B981" stopOpacity="0.28" />
-          <stop offset="100%" stopColor="#10B981" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {ticks.map((t) => (
-        <g key={t}>
-          <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} style={{ stroke: 'var(--line2)', strokeWidth: 1 }} />
-          <text x={padL - 6} y={y(t) + 3.5} style={{ fontSize: 10, fill: 'var(--ink2)', textAnchor: 'end' }}>
-            {t}
-          </text>
-        </g>
-      ))}
-      {months.map((m) => (
-        <text key={m.k} x={x(m.k)} y={H - 6} style={{ fontSize: 10, fill: 'var(--ink2)', textAnchor: 'middle' }}>
-          {m.label}
-        </text>
-      ))}
-      {profile.goal !== 'maintien' && (
-        <>
-          <line x1={padL} x2={W - padR} y1={y(profile.goalWeight)} y2={y(profile.goalWeight)} style={{ stroke: 'var(--lime)', strokeWidth: 1.5, strokeDasharray: '3 4' }} />
-          {arrival && (
-            <line x1={x(today)} y1={y(cur)} x2={x(dayKey(arrival))} y2={y(profile.goalWeight)} style={{ stroke: 'var(--lime)', strokeWidth: 2.5, strokeDasharray: '5 6', strokeLinecap: 'round' }} />
-          )}
-        </>
-      )}
-      {list.map((w) => (
-        <circle key={w.date} cx={x(w.date)} cy={y(w.kg)} r={2.6} style={{ fill: 'var(--brand)', opacity: 0.45 }} />
-      ))}
-      {list.length > 1 && (
-        <polygon
-          points={`${x(list[0].date).toFixed(1)},${(H - padB).toFixed(1)} ${avgPts} ${x(list[list.length - 1].date).toFixed(1)},${(H - padB).toFixed(1)}`}
-          style={{ fill: 'url(#elan-area)', stroke: 'none' }}
-        />
-      )}
-      {list.length > 1 && <polyline points={avgPts} style={{ fill: 'none', stroke: 'var(--brand-ink)', strokeWidth: 2.5, strokeLinejoin: 'round', strokeLinecap: 'round' }} />}
-      <circle cx={x(today)} cy={y(cur)} r={5} style={{ fill: 'var(--brand)', stroke: 'var(--card)', strokeWidth: 2 }} />
-    </svg>
   );
 }
 
@@ -645,6 +530,7 @@ function MuscleVolume() {
 
 // ---------------- Cardio : course et séances type Hyrox ----------------
 function CardioView() {
+  const [result, setResult] = useState<string | null>(null);
   const all = runs();
   const today = dayKey();
   const monthStart = today.slice(0, 8) + '01';
@@ -771,19 +657,20 @@ function CardioView() {
       {circuits.length > 0 && (
         <>
           <div className="section-head">
-            <h2 className="h2">Séances type Hyrox</h2>
+            <h2 className="h2">Type Hyrox et kettlebell</h2>
           </div>
           <div className="card tight">
             {circuits.map((c, i) => (
               <div key={c.id}>
-                <div className="list-row">
+                <div className="list-row press" role="button" tabIndex={0} onClick={() => setResult(c.id)}>
                   <span className="tile sm tint-orange">
-                    <Icon name="bolt" size={18} />
+                    <Icon name={actIcon(c.data)} size={18} />
                   </span>
                   <div className="grow col" style={{ gap: 2 }}>
                     <span style={{ fontWeight: 600 }}>{c.data.plan?.name ?? 'Séance'}</span>
                     <span className="small muted">
                       {shortDate(c.data.date)}
+                      {c.data.plan?.kind === 'kb' ? ` · kettlebell ${c.data.plan.kg} kg` : ''}
                       {c.data.duo ? ' · à deux' : ''}
                     </span>
                   </div>
@@ -795,6 +682,7 @@ function CardioView() {
           </div>
         </>
       )}
+      <CircuitResultSheet id={result} onClose={() => setResult(null)} />
     </>
   );
 }

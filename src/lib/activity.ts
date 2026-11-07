@@ -26,6 +26,10 @@ export type Activity = {
   kcal?: number;
   hrAvg?: number;
   hrMax?: number;
+  /** cœur pendant l'effort : [secondes depuis watchStart, bpm] */
+  hr?: number[][];
+  /** début de l'entraînement sur la montre */
+  watchStart?: string;
   /** dénivelé positif en mètres */
   elev?: number;
   /** parcours : [lat, lon, secondes depuis le départ, altitude] */
@@ -157,9 +161,20 @@ export function fmtDuration(sec: number) {
 export function circuitScore(a: Activity) {
   const p = a.plan;
   if (!p) return '';
-  if (p.format === 'enchainement') return chrono((a.splits ?? []).reduce((x, y) => x + y, 0));
+  if (p.format === 'enchainement' || p.format === 'wod') return chrono((a.splits ?? []).reduce((x, y) => x + y, 0));
   if (p.format === 'emom') return `${p.minutes - (a.missed?.length ?? 0)} / ${p.minutes} min réussies`;
   return `${a.rounds ?? 0} tour${(a.rounds ?? 0) > 1 ? 's' : ''}${a.extra ? ` + ${a.extra} reps` : ''}`;
+}
+
+/** Nom d'une activité : les séances kettlebell sont des circuits à part */
+export function actLabel(a: Activity) {
+  if (a.type === 'circuit' && a.plan?.kind === 'kb') return 'Kettlebell';
+  return ACTIVITY[a.type].label;
+}
+
+export function actIcon(a: Activity) {
+  if (a.type === 'circuit' && a.plan?.kind === 'kb') return 'kettlebell';
+  return ACTIVITY[a.type].icon;
 }
 
 export function activityLine(a: Activity) {
@@ -175,13 +190,13 @@ export function activeCircuit() {
   return allOf<Activity>('activity').find((d) => d.data.type === 'circuit' && !d.data.endedAt);
 }
 
-// Demande d'ouverture depuis l'accueil (bouton « Hyrox »)
-let circuitAsked = false;
-export function askCircuit() {
-  circuitAsked = true;
+// Demande d'ouverture depuis l'accueil (boutons « Hyrox » et « Kettlebell »)
+let circuitAsked: 'hyrox' | 'kb' | null = null;
+export function askCircuit(kind: 'hyrox' | 'kb' = 'hyrox') {
+  circuitAsked = kind;
 }
 export function takeCircuitAsk() {
   const v = circuitAsked;
-  circuitAsked = false;
+  circuitAsked = null;
   return v;
 }

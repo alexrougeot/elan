@@ -4,7 +4,7 @@ import { supabase } from './lib/supabase';
 import { getData, openStore, putDoc, useStoreVersion } from './lib/store';
 import { loadCustomExercises, upgradedProgram, womenSwap, type Program } from './lib/program';
 import { startSyncLoop, syncNow } from './lib/sync';
-import type { Profile } from './lib/nutrition';
+import { nutritionOn, type Profile } from './lib/nutrition';
 import { Icon, LogoMark, Toasts, showToast } from './components/ui';
 import { RunHost } from './screens/Runs';
 import AuthScreen from './screens/Auth';
@@ -13,14 +13,22 @@ import Today from './screens/Today';
 import Workout from './screens/Workout';
 import Nutrition from './screens/Nutrition';
 import Progress from './screens/Progress';
+import Records from './screens/Records';
 import Settings, { type SettingsStart } from './screens/Settings';
 
-export type Tab = 'today' | 'workout' | 'nutrition' | 'progress';
+export type Tab = 'today' | 'workout' | 'nutrition' | 'progress' | 'records';
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'today', label: 'Aujourd’hui', icon: 'home' },
   { id: 'workout', label: 'Séance', icon: 'dumbbell' },
   { id: 'nutrition', label: 'Nutrition', icon: 'fork' },
   { id: 'progress', label: 'Progrès', icon: 'chart' },
+];
+// sans suivi nutrition, l'onglet laisse la place aux records
+const TABS_NO_FOOD: { id: Tab; label: string; icon: string }[] = [
+  { id: 'today', label: 'Aujourd’hui', icon: 'home' },
+  { id: 'workout', label: 'Séance', icon: 'dumbbell' },
+  { id: 'progress', label: 'Progrès', icon: 'chart' },
+  { id: 'records', label: 'Records', icon: 'trophy' },
 ];
 
 function storedUserId(): string | null {
@@ -35,7 +43,7 @@ function storedUserId(): string | null {
 
 function initialTab(): Tab {
   const q = new URLSearchParams(location.search).get('onglet');
-  const map: Record<string, Tab> = { seance: 'workout', nutrition: 'nutrition', progres: 'progress' };
+  const map: Record<string, Tab> = { seance: 'workout', nutrition: 'nutrition', progres: 'progress', records: 'records' };
   return (q && map[q]) || (sessionStorage.getItem('elan.tab') as Tab) || 'today';
 }
 
@@ -124,7 +132,11 @@ function Signed() {
 }
 
 function Shell() {
-  const [tab, setTab] = useState<Tab>(initialTab);
+  useStoreVersion();
+  const food = nutritionOn();
+  const tabs = food ? TABS : TABS_NO_FOOD;
+  const [rawTab, setTab] = useState<Tab>(initialTab);
+  const tab: Tab = tabs.some((t) => t.id === rawTab) ? rawTab : 'today';
   const [settings, setSettings] = useState(false);
   const [settingsStart, setSettingsStart] = useState<SettingsStart>(null);
 
@@ -184,10 +196,11 @@ function Shell() {
       )}
       {tab === 'nutrition' && <Nutrition />}
       {tab === 'progress' && <Progress />}
+      {tab === 'records' && <Records />}
 
       <nav className="tabbar" aria-label="Navigation">
         <div className="tabbar-inner">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button key={t.id} className="tab press" aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
               <span className="tab-ico">
                 <Icon name={t.icon} size={24} />

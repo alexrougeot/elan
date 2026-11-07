@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { dayKey, fmtKg } from '../lib/dates';
 import { getData, putDoc } from '../lib/store';
-import { currentWeight, type Profile, type WeighIn as W } from '../lib/nutrition';
+import { currentWeight, weighIns, type Profile, type WeighIn as W } from '../lib/nutrition';
 import { haptic } from '../lib/device';
 import { Sheet, Stepper, showToast } from './ui';
 
@@ -18,8 +18,17 @@ export default function WeighInSheet({ open, onClose }: { open: boolean; onClose
 
   async function save() {
     haptic();
+    const profile = getData<Profile>('profile');
+    const before = weighIns().filter((w) => w.date !== today);
+    const prev = before[before.length - 1];
     await putDoc('weight:' + today, 'weight', { date: today, kg });
-    showToast(`Pesée enregistrée : ${fmtKg(kg)} kg`);
+    const delta = prev ? kg - prev.kg : 0;
+    const deltaText = prev && Math.abs(delta) >= 0.05 ? ` (${delta.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1, signDisplay: 'always' })} kg)` : '';
+    const down = profile?.goal === 'seche';
+    const best = before.length ? (down ? Math.min(...before.map((w) => w.kg)) : Math.max(...before.map((w) => w.kg))) : undefined;
+    if (best !== undefined && profile?.goal !== 'maintien' && (down ? kg < best : kg > best))
+      showToast(`Nouveau record : ${fmtKg(kg)} kg, ton poids le plus ${down ? 'bas' : 'haut'}${deltaText}. Bravo !`, undefined, 6000);
+    else showToast(`Pesée enregistrée : ${fmtKg(kg)} kg${deltaText}`);
     onClose();
   }
 

@@ -9,9 +9,9 @@ import { haptic, keepScreenOn, tone, unlockAudio } from '../lib/device';
 import { getLink, healthForSession, healthLine } from '../lib/health';
 import WatchCard from '../components/WatchCard';
 import { HeroLeaves, Icon, Ring, Sheet, Stepper, muscleTint, showToast, useNow } from '../components/ui';
-import { ACTIVITY, activeCircuit, activities, activitiesOn, activityLine, takeCircuitAsk } from '../lib/activity';
+import { ACTIVITY, actIcon, actLabel, activeCircuit, activities, activitiesOn, activityLine, takeCircuitAsk } from '../lib/activity';
 import ActivitySheet from '../components/ActivitySheet';
-import { CircuitStartSheet, CircuitView } from './Circuit';
+import { CircuitResultSheet, CircuitStartSheet, CircuitView } from './Circuit';
 import ExercisePicker from '../components/ExercisePicker';
 import SkipSheet from '../components/SkipSheet';
 import { fetchRun, openRun } from './Runs';
@@ -35,7 +35,9 @@ function Planner({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayI
   const [busy, setBusy] = useState(false);
 
   const [ask, setAsk] = useState<ProgramDay | null>(null);
-  const [circuitOpen, setCircuitOpen] = useState(() => takeCircuitAsk());
+  const [circuitOpen, setCircuitOpen] = useState<'hyrox' | 'kb' | null>(() => takeCircuitAsk());
+  const [result, setResult] = useState<string | null>(null);
+  const [lastKind, setLastKind] = useState<'hyrox' | 'kb'>(circuitOpen ?? 'hyrox');
   const [actOpen, setActOpen] = useState(false);
   const [skip, setSkip] = useState(false);
   const [past, setPast] = useState<string | null>(null);
@@ -169,13 +171,36 @@ function Planner({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayI
         <h2 className="h2">Week-end et activités libres</h2>
       </div>
       <div className="card tight">
-        <button className="list-row press" onClick={() => setCircuitOpen(true)}>
+        <button
+          className="list-row press"
+          onClick={() => {
+            setLastKind('hyrox');
+            setCircuitOpen('hyrox');
+          }}
+        >
           <span className="tile sm tint-orange">
             <Icon name="bolt" size={18} />
           </span>
           <div className="grow col" style={{ gap: 2 }}>
             <span style={{ fontWeight: 600 }}>Séance type Hyrox</span>
             <span className="small muted">3 formats au choix, nouveau contenu chaque semaine</span>
+          </div>
+          <Icon name="right" style={{ color: 'var(--ink3)' }} />
+        </button>
+        <div className="divider" />
+        <button
+          className="list-row press"
+          onClick={() => {
+            setLastKind('kb');
+            setCircuitOpen('kb');
+          }}
+        >
+          <span className="tile sm tint-orange">
+            <Icon name="kettlebell" size={18} />
+          </span>
+          <div className="grow col" style={{ gap: 2 }}>
+            <span style={{ fontWeight: 600 }}>Kettlebell à la maison</span>
+            <span className="small muted">25 min en AMRAP, WOD ou EMOM, nouveau chaque semaine</span>
           </div>
           <Icon name="right" style={{ color: 'var(--ink3)' }} />
         </button>
@@ -213,15 +238,25 @@ function Planner({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayI
               if (a)
                 return (
                   <div key={a.id}>
-                    <div className={'list-row' + (a.data.type === 'course' ? ' press' : '')} role={a.data.type === 'course' ? 'button' : undefined} tabIndex={a.data.type === 'course' ? 0 : undefined} onClick={a.data.type === 'course' ? () => openRun(a.id) : undefined}>
+                    <div
+                      className={'list-row' + (a.data.type === 'course' || a.data.type === 'circuit' ? ' press' : '')}
+                      role={a.data.type === 'course' || a.data.type === 'circuit' ? 'button' : undefined}
+                      tabIndex={a.data.type === 'course' || a.data.type === 'circuit' ? 0 : undefined}
+                      onClick={a.data.type === 'course' ? () => openRun(a.id) : a.data.type === 'circuit' ? () => setResult(a.id) : undefined}
+                    >
                       <span className={'tile sm ' + (a.data.type === 'circuit' ? 'tint-orange' : 'tint-sky')}>
-                        <Icon name={ACTIVITY[a.data.type].icon} size={18} />
+                        <Icon name={actIcon(a.data)} size={18} />
                       </span>
                       <div className="grow col" style={{ gap: 2 }}>
-                        <span style={{ fontWeight: 600 }}>{ACTIVITY[a.data.type].label}</span>
+                        <span style={{ fontWeight: 600 }}>{actLabel(a.data)}</span>
                         <span className="small muted">
                           {shortDate(a.data.date)} · {activityLine(a.data)}
                         </span>
+                        {a.data.type === 'circuit' && (a.data.kcal || a.data.hrAvg) ? (
+                          <span className="tiny" style={{ color: 'var(--sky-ink)', fontWeight: 600 }}>
+                            {a.data.source ?? 'Montre'} : {[a.data.kcal ? `${a.data.kcal} kcal` : '', a.data.hrAvg ? `cœur moyen ${a.data.hrAvg}` : ''].filter(Boolean).join(' · ')}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                     {i < feed.length - 1 && <div className="divider" />}
@@ -256,7 +291,8 @@ function Planner({ go, openProgram }: { go: (t: Tab) => void; openProgram: (dayI
         </>
       )}
       <ReadinessSheet day={ask} onClose={() => setAsk(null)} onPick={go2} />
-      <CircuitStartSheet open={circuitOpen} onClose={() => setCircuitOpen(false)} />
+      <CircuitStartSheet open={!!circuitOpen} kind={circuitOpen ?? lastKind} onClose={() => setCircuitOpen(null)} />
+      <CircuitResultSheet id={result} onClose={() => setResult(null)} />
       <ActivitySheet open={actOpen} onClose={() => setActOpen(false)} />
       <SkipSheet open={skip} onClose={() => setSkip(false)} />
       <PastSessionSheet id={past} onClose={() => setPast(null)} />
@@ -1278,7 +1314,7 @@ function ReadinessSheet({ day, onClose, onPick }: { day: ProgramDay | null; onCl
       {yesterday && (
         <div className="card row small" style={{ background: 'var(--orange-tint)', boxShadow: 'none', color: 'var(--orange-ink)', gap: 8 }}>
           <Icon name="run" size={18} />
-          Hier : {ACTIVITY[yesterday.data.type].label.toLowerCase()} ({activityLine(yesterday.data)}).{legs ? ' Si tes jambes sont lourdes, mets une énergie plus faible : je baisserai les charges.' : ''}
+          Hier : {actLabel(yesterday.data).toLowerCase()} ({activityLine(yesterday.data)}).{legs ? ' Si tes jambes sont lourdes, mets une énergie plus faible : je baisserai les charges.' : ''}
         </div>
       )}
       {row('Ton sommeil cette nuit', sleep, setSleep, ['Mauvais', 'Moyen', 'Bon'])}

@@ -28,6 +28,8 @@ export type Targets = {
   history: Adjustment[];
   /** hydratation : objectif et heures des rappels */
   water?: { goalMl: number; reminders: string[] };
+  /** suivi nutrition désactivé : pas d'onglet, pas de rappels de repas ni d'eau (la pesée du matin reste) */
+  off?: boolean;
 };
 
 export type Macros = { k: number; p: number; g: number; l: number };
@@ -97,6 +99,11 @@ function massMeals(): Meal[] {
 
 export function getTargets(): Targets | undefined {
   return getData<Targets>('targets');
+}
+
+/** Suivi nutrition activé (par défaut oui) */
+export function nutritionOn() {
+  return !getData<Targets>('targets')?.off;
 }
 
 export function kcalOf(m: { p: number; g: number; l: number }) {

@@ -85,7 +85,7 @@ function MainPage({ go }: { go: (p: 'profile' | 'nutrition' | 'program' | 'watch
     const r = await enablePush();
     if (r === 'ok') {
       setPush(true);
-      showToast('Rappels de repas activés');
+      showToast(targets?.off ? 'Rappel de pesée activé' : 'Rappels de repas activés');
     } else if (r === 'denied') showToast('Notifications refusées. Autorise-les dans Réglages, Notifications, Élan.', undefined, 6000);
     else if (r === 'unsupported') showToast('Installe d’abord Élan sur l’écran d’accueil.', undefined, 6000);
     else showToast('Impossible pour l’instant. Réessaie avec du réseau.');
@@ -105,22 +105,42 @@ function MainPage({ go }: { go: (p: 'profile' | 'nutrition' | 'program' | 'watch
       <div className="card tight" style={{ background: 'var(--card2)', boxShadow: 'none' }}>
         <Row icon="user" title={profile.name} sub={`${GOALS[profile.goal]} · ${profile.weight} kg → ${profile.goalWeight} kg`} onClick={() => go('profile')} />
         <div className="divider" />
-        <Row icon="fork" title="Objectifs et repas" sub={targets ? `${targets.kcal} kcal · ${targets.meals.length} repas · ${targets.mode === 'auto' ? 'ajustement auto' : 'manuel'}` : ''} onClick={() => go('nutrition')} />
-        <div className="divider" />
+        {!targets?.off && (
+          <>
+            <Row icon="fork" title="Objectifs et repas" sub={targets ? `${targets.kcal} kcal · ${targets.meals.length} repas · ${targets.mode === 'auto' ? 'ajustement auto' : 'manuel'}` : ''} onClick={() => go('nutrition')} />
+            <div className="divider" />
+          </>
+        )}
         <Row icon="dumbbell" title="Programme" sub={program ? (program.days.length ? program.days.map((d) => WEEKDAYS[d.weekday].slice(0, 3).toLowerCase()).join(', ') + ` · ${program.days.length} séance${program.days.length > 1 ? 's' : ''}` : 'Aucune séance') : ''} onClick={() => go('program')} />
         <div className="divider" />
         <Row icon="timer" title="Montre et Santé" sub={getLink() ? 'Apple Watch ou Garmin reliée' : 'Courses avec parcours, calories et cœur'} onClick={() => go('watch')} />
       </div>
 
       <div className="card col" style={{ gap: 4, background: 'var(--card2)', boxShadow: 'none' }}>
+        {targets && (
+          <div className="row between" style={{ minHeight: 48 }}>
+            <div className="col" style={{ gap: 1 }}>
+              <span style={{ fontWeight: 600 }}>Suivi nutrition</span>
+              <span className="small muted">{targets.off ? 'Désactivé : pas de calories ni de repas. La pesée du matin reste.' : 'Calories, repas, eau et leurs rappels'}</span>
+            </div>
+            <Toggle
+              on={!targets.off}
+              onChange={() => {
+                void putDoc('targets', 'targets', { ...targets, off: !targets.off });
+                showToast(targets.off ? 'Suivi nutrition réactivé' : 'Suivi nutrition désactivé');
+              }}
+              label="Suivi nutrition"
+            />
+          </div>
+        )}
         <div className="row between" style={{ minHeight: 48 }}>
           <div className="col" style={{ gap: 1 }}>
-            <span style={{ fontWeight: 600 }}>Rappels de repas</span>
+            <span style={{ fontWeight: 600 }}>{targets?.off ? 'Rappel de pesée' : 'Rappels de repas'}</span>
             <span className="small muted">
-              {!pushSupported() || (isIOS() && !isStandalone()) ? 'Installe Élan sur l’écran d’accueil pour les activer.' : push ? 'Activés sur ce téléphone' : 'Une notification à chaque repas'}
+              {!pushSupported() || (isIOS() && !isStandalone()) ? 'Installe Élan sur l’écran d’accueil pour les activer.' : push ? 'Activés sur ce téléphone' : targets?.off ? 'Une notification le matin pour te peser' : 'Une notification à chaque repas'}
             </span>
           </div>
-          <Toggle on={!!push} onChange={togglePush} label="Rappels de repas" disabled={!pushSupported() || (isIOS() && !isStandalone())} />
+          <Toggle on={!!push} onChange={togglePush} label={targets?.off ? 'Rappel de pesée' : 'Rappels de repas'} disabled={!pushSupported() || (isIOS() && !isStandalone())} />
         </div>
         <div className="row between" style={{ minHeight: 48 }}>
           <div className="col" style={{ gap: 1 }}>
