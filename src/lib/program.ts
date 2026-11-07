@@ -127,6 +127,25 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('windshield', 'Essuie-glaces', 'Abdos', 'poids du corps', false, false, ['russian_twist'], { timed: true, increment: 0 }),
     ex('bear_hold', 'Position de l’ours', 'Abdos', 'poids du corps', false, false, ['plank'], { timed: true, increment: 0 }),
     ex('abs_circuit', 'Abdos · 10 min', 'Abdos', 'poids du corps', false, false, [], { timed: true, increment: 0, circuit: true }),
+    // échauffement de début de séance (cachés dans la liste des exercices)
+    ex('warmup', 'Échauffement', 'Échauffement', 'poids du corps', false, false, [], { timed: true, increment: 0, circuit: true }),
+    ...([
+      ['wu_jacks', 'Jumping jacks'],
+      ['wu_knees', 'Montées de genoux'],
+      ['wu_arm_circles', 'Cercles de bras'],
+      ['wu_thoracic', 'Rotations du dos à 4 pattes'],
+      ['wu_ytw', 'Y-T-W allongé'],
+      ['wu_scap_pushup', 'Pompes scapulaires'],
+      ['wu_pushup', 'Pompes lentes'],
+      ['wu_inchworm', 'Marche des mains'],
+      ['wu_leg_swings', 'Balancés de jambes'],
+      ['wu_hip_circles', 'Cercles de hanches'],
+      ['wu_good_morning', 'Good mornings à vide'],
+      ['wu_squat', 'Squats au poids du corps'],
+      ['wu_bridge', 'Ponts fessiers'],
+      ['wu_lunge_rot', 'Fentes avec rotation'],
+      ['wu_ankle', 'Mobilité des chevilles'],
+    ] as const).map(([k, n]) => ex(k, n, 'Échauffement', 'poids du corps', false, false, [], { timed: true, increment: 0, circuit: true })),
     // Pour compléter : les classiques de salle
     ex('pec_deck', 'Pec deck (butterfly)', 'Pectoraux', 'machine', false, false, ['cable_fly', 'db_fly']),
     ex('cable_fly', 'Écarté à la poulie', 'Pectoraux', 'poulie', false, false, ['pec_deck', 'db_fly'], { increment: 1.25 }),
@@ -166,6 +185,45 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
 );
 
 export type Circuit = { keys: string[]; work: number; rest: number; rounds: number; number?: number };
+
+/** Comment faire chaque mouvement d'échauffement (affiché pendant le minuteur) */
+export const WARMUP_CUES: Record<string, string> = {
+  wu_jacks: 'Léger et régulier : on fait monter le cœur.',
+  wu_knees: 'Sur place, genoux à hauteur de hanches, bras qui suivent.',
+  wu_arm_circles: 'Petits puis grands cercles, en avant puis en arrière.',
+  wu_thoracic: 'À 4 pattes, une main derrière la tête : ouvre le coude vers le plafond. 20 s par côté.',
+  wu_ytw: 'À plat ventre, bras en Y, en T puis en W : serre les omoplates à chaque fois.',
+  wu_scap_pushup: 'En planche, bras tendus : rapproche puis écarte les omoplates, sans plier les coudes.',
+  wu_pushup: 'Lentes et contrôlées, sur les genoux si besoin. Pas jusqu’à la fatigue.',
+  wu_inchworm: 'Debout, mains au sol, marche avec les mains jusqu’à la planche, puis reviens.',
+  wu_leg_swings: 'Une main au mur : avant-arrière puis de côté. 20 s par jambe.',
+  wu_hip_circles: 'Mains sur les hanches, grands cercles dans les deux sens.',
+  wu_good_morning: 'Mains derrière la tête, dos plat : penche-toi en poussant les fesses en arrière.',
+  wu_squat: 'Lents, en descendant le plus bas possible, talons au sol.',
+  wu_bridge: 'Sur le dos, pousse dans les talons et serre les fessiers en haut.',
+  wu_lunge_rot: 'Grande fente avant, puis tourne le buste du côté de la jambe avant. En alternant.',
+  wu_ankle: 'Genou vers l’avant au-dessus des orteils, talon au sol. 20 s par cheville.',
+};
+
+/**
+ * Échauffement de 5 minutes adapté à la séance : 6 mouvements de 40 s.
+ * Jambes → hanches, fessiers, chevilles ; haut du corps → épaules, omoplates, dos ; mélange → un peu des deux.
+ */
+export function warmupFor(exercises: PlannedExercise[]): Circuit {
+  const defs = exercises.filter((e) => !e.circuit).map((e) => CATALOG[e.key]).filter(Boolean);
+  const lower = defs.filter((d) => d.lower).length;
+  const upper = defs.length - lower;
+  const has = (re: RegExp) => defs.some((d) => re.test(d.muscle));
+  const hinge = defs.some((d) => /deadlift|rdl|good_morning|hip_thrust|glute/.test(d.key));
+  const squat = defs.some((d) => /squat|leg_press|lunge|bulgarian|step_up/.test(d.key));
+  let keys: string[];
+  if (lower >= upper * 2) keys = ['wu_jacks', 'wu_leg_swings', hinge ? 'wu_good_morning' : 'wu_hip_circles', squat ? 'wu_ankle' : 'wu_hip_circles', 'wu_bridge', squat ? 'wu_squat' : 'wu_lunge_rot'];
+  else if (upper >= lower * 2) keys = ['wu_jacks', 'wu_arm_circles', 'wu_thoracic', has(/Dos|Biceps/) ? 'wu_ytw' : 'wu_inchworm', 'wu_scap_pushup', has(/Pectoraux|Triceps|Épaules/) ? 'wu_pushup' : 'wu_ytw'];
+  else keys = ['wu_jacks', 'wu_arm_circles', 'wu_leg_swings', 'wu_ytw', 'wu_squat', 'wu_lunge_rot'];
+  const uniq = [...new Set(keys)];
+  for (const k of ['wu_knees', 'wu_inchworm', 'wu_lunge_rot', 'wu_hip_circles']) if (uniq.length < 6 && !uniq.includes(k)) uniq.push(k);
+  return { keys: uniq, work: 40, rest: 8, rounds: 1 };
+}
 export type PlannedExercise = {
   key: string;
   sets: number;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tab } from '../App';
 import { getData, getDoc, putDoc, removeDoc, useStoreVersion } from '../lib/store';
 import { addDays, dayKey, fmtNum, fmtWeight, longDate, shortDate, WEEKDAYS } from '../lib/dates';
-import { CATALOG, defaultRest, estimateMinutes, exName, platesFor, type Circuit, type Program, type ProgramDay } from '../lib/program';
+import { CATALOG, defaultRest, estimateMinutes, exName, platesFor, WARMUP_CUES, type Circuit, type Program, type ProgramDay } from '../lib/program';
 import { autoAdjust, bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
 import { activeSession, adjustRest, getProgram, groupMembers, nextPending, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest, warmupsFor, type Readiness } from '../lib/workout';
 import { haptic, keepScreenOn, tone, unlockAudio } from '../lib/device';
@@ -400,7 +400,7 @@ function SessionView({ id }: { id: string }) {
       return x;
     });
     setCircuitFor(null);
-    showToast('Abdos terminés, bravo !');
+    showToast(getDoc<Session>(id)!.data.exercises[ei]?.key === 'warmup' ? 'Échauffé : place à la séance !' : 'Abdos terminés, bravo !');
     const after = getDoc<Session>(id)!.data;
     if (!nextPending(after)) setFinish(true);
   }
@@ -450,7 +450,7 @@ function SessionView({ id }: { id: string }) {
     let at = 0;
     await updateSession(id, (x) => {
       // les abdos restent à la fin
-      const circuit = x.exercises.findIndex((e) => e.planned.circuit);
+      const circuit = x.exercises.findIndex((e) => e.planned.circuit && e.key !== 'warmup');
       at = circuit >= 0 ? circuit : x.exercises.length;
       x.exercises.splice(at, 0, prepared);
       return x;
@@ -515,7 +515,7 @@ function SessionView({ id }: { id: string }) {
 
       {s.exercises.map((ex, ei) =>
         ex.planned.circuit ? (
-          <CircuitCard key={ei + ex.key} id={'ex-' + ei} ex={ex} isCurrent={currentGroup.includes(ei)} onStart={() => setCircuitFor(ei)} />
+          <CircuitCard key={ei + ex.key} id={'ex-' + ei} ex={ex} isCurrent={currentGroup.includes(ei)} onStart={() => setCircuitFor(ei)} onSkip={() => void circuitDone(ei)} />
         ) : (
         <ExerciseCard
           key={ei + ex.key}
@@ -569,6 +569,7 @@ function SessionView({ id }: { id: string }) {
       <PlatesSheet session={s} index={plates} onClose={() => setPlates(null)} />
       <FinishSheet sid={id} session={s} open={finish} onClose={() => setFinish(false)} />
       <CircuitSheet
+        warm={circuitFor !== null && s.exercises[circuitFor]?.key === 'warmup'}
         circuit={circuitFor !== null ? s.exercises[circuitFor]?.planned.circuit : undefined}
         onClose={() => setCircuitFor(null)}
         onDone={() => circuitFor !== null && circuitDone(circuitFor)}
@@ -1066,24 +1067,25 @@ function circuitLabels(keys: string[]) {
   });
 }
 
-function CircuitCard({ id, ex, isCurrent, onStart }: { id: string; ex: SessionExercise; isCurrent: boolean; onStart: () => void }) {
+function CircuitCard({ id, ex, isCurrent, onStart, onSkip }: { id: string; ex: SessionExercise; isCurrent: boolean; onStart: () => void; onSkip: () => void }) {
   const c = ex.planned.circuit!;
   const done = ex.sets.every((x) => x.done);
   const labels = circuitLabels(c.keys);
   const minutes = Math.round((c.rounds * c.keys.length * (c.work + c.rest)) / 60);
+  const warm = ex.key === 'warmup';
   return (
     <section id={id} className={isCurrent ? 'hero col' : 'card col'} style={{ gap: 12, scrollMarginTop: 16 }}>
       {isCurrent && <HeroLeaves />}
       <div className="row between">
         <div className="col" style={{ gap: 4 }}>
-          <span className={'muscle ' + (isCurrent ? '' : 'tint-violet')} style={isCurrent ? { background: 'rgba(255,255,255,0.16)', color: '#fff' } : undefined}>
-            Abdos
+          <span className={'muscle ' + (isCurrent ? '' : warm ? 'tint-orange' : 'tint-violet')} style={isCurrent ? { background: 'rgba(255,255,255,0.16)', color: '#fff', alignSelf: 'flex-start' } : { alignSelf: 'flex-start' }}>
+            {warm ? 'Échauffement' : 'Abdos'}
           </span>
           <span style={{ fontSize: 19, fontWeight: 700 }}>
-            Circuit abdos{c.number ? ` n°${c.number}` : ''} · {minutes} min
+            {warm ? `Échauffement · ${minutes} min` : `Circuit abdos${c.number ? ` n°${c.number}` : ''} · ${minutes} min`}
           </span>
           <span className={'small ' + (isCurrent ? 'on-hero-2' : 'muted')}>
-            {c.rounds} tours · {c.work} s d’effort, {c.rest} s de repos
+            {warm ? `${c.keys.length} mouvements de ${c.work} s, pour les muscles du jour` : `${c.rounds} tours · ${c.work} s d’effort, ${c.rest} s de repos`}
           </span>
         </div>
         {done && (
@@ -1106,8 +1108,8 @@ function CircuitCard({ id, ex, isCurrent, onStart }: { id: string; ex: SessionEx
                 justifyContent: 'center',
                 fontSize: 12,
                 fontWeight: 700,
-                background: isCurrent ? 'rgba(255,255,255,0.16)' : 'var(--violet-tint)',
-                color: isCurrent ? '#fff' : 'var(--violet-ink)',
+                background: isCurrent ? 'rgba(255,255,255,0.16)' : warm ? 'var(--orange-tint)' : 'var(--violet-tint)',
+                color: isCurrent ? '#fff' : warm ? 'var(--orange-ink)' : 'var(--violet-ink)',
               }}
             >
               {i + 1}
@@ -1118,15 +1120,24 @@ function CircuitCard({ id, ex, isCurrent, onStart }: { id: string; ex: SessionEx
       </div>
       <button className={isCurrent ? 'hero-btn press' : 'btn ghost press'} onClick={onStart}>
         <Icon name="timer" size={20} />
-        {done ? 'Refaire le circuit' : 'Lancer le minuteur'}
+        {done ? (warm ? 'Refaire l’échauffement' : 'Refaire le circuit') : warm ? 'Lancer l’échauffement' : 'Lancer le minuteur'}
       </button>
+      {warm && !done && (
+        <button
+          className="press"
+          onClick={onSkip}
+          style={{ background: 'none', border: 'none', minHeight: 40, fontWeight: 600, fontSize: 15, color: isCurrent ? 'rgba(255,255,255,0.8)' : 'var(--ink2)' }}
+        >
+          Déjà échauffé, je passe
+        </button>
+      )}
     </section>
   );
 }
 
 type Phase = { type: 'work' | 'rest'; key: string; label: string; i: number; r: number; dur: number };
 
-function CircuitSheet({ circuit, onClose, onDone }: { circuit?: Circuit; onClose: () => void; onDone: () => void }) {
+function CircuitSheet({ circuit, warm, onClose, onDone }: { circuit?: Circuit; warm?: boolean; onClose: () => void; onDone: () => void }) {
   const [startAt, setStartAt] = useState<number | null>(null);
   const [pausedAt, setPausedAt] = useState<number | null>(null);
   const [skip, setSkip] = useState(0);
@@ -1219,14 +1230,33 @@ function CircuitSheet({ circuit, onClose, onDone }: { circuit?: Circuit; onClose
   const after = phases.slice(idx + 1).find((p) => p.type === 'work');
 
   return (
-    <Sheet open={!!circuit} onClose={onClose} title="Circuit abdos" full>
+    <Sheet open={!!circuit} onClose={onClose} title={warm ? 'Échauffement' : 'Circuit abdos'} full>
       {circuit && (
         <div className="col" style={{ gap: 16 }}>
           {!startAt ? (
             <>
               <p className="small muted" style={{ margin: 0 }}>
-                {circuit.rounds} tours de {circuit.keys.length} exercices, {circuit.work} s d’effort et {circuit.rest} s de repos. Un bip annonce chaque changement, avec un compte à rebours 3, 2, 1. Monte le son.
+                {warm
+                  ? `${circuit.keys.length} mouvements de ${circuit.work} s, à faire tranquillement : le but est de chauffer, pas de se fatiguer. ${circuit.rest} s pour changer. Un bip annonce chaque changement. Monte le son.`
+                  : `${circuit.rounds} tours de ${circuit.keys.length} exercices, ${circuit.work} s d’effort et ${circuit.rest} s de repos. Un bip annonce chaque changement, avec un compte à rebours 3, 2, 1. Monte le son.`}
               </p>
+              {warm && (
+                <div className="col" style={{ gap: 8 }}>
+                  {circuit.keys.map((k, i) => (
+                    <div key={k} className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+                      <span className="tile sm tint-orange" style={{ fontWeight: 700, fontSize: 13 }}>
+                        {i + 1}
+                      </span>
+                      <div className="col grow" style={{ gap: 1 }}>
+                        <span className="small" style={{ fontWeight: 650 }}>
+                          {exName(k)}
+                        </span>
+                        {WARMUP_CUES[k] && <span className="tiny muted">{WARMUP_CUES[k]}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <button className="btn brand press" onClick={start}>
                 <Icon name="timer" />
                 C’est parti ({Math.round(total / 60)} min)
@@ -1236,16 +1266,17 @@ function CircuitSheet({ circuit, onClose, onDone }: { circuit?: Circuit; onClose
             <div className="hero col" style={{ gap: 10, alignItems: 'center', textAlign: 'center' }}>
               <HeroLeaves />
               <Icon name="trophy" size={40} />
-              <span style={{ fontSize: 24, fontWeight: 700 }}>Circuit terminé</span>
+              <span style={{ fontSize: 24, fontWeight: 700 }}>{warm ? 'Échauffement terminé' : 'Circuit terminé'}</span>
             </div>
           ) : (
             <>
               <div className={work ? 'hero col' : 'card col'} style={{ gap: 10, alignItems: 'center', textAlign: 'center', padding: 24, background: work ? undefined : 'var(--card2)', boxShadow: work ? undefined : 'none' }}>
                 {work && <HeroLeaves />}
                 <span className={work ? 'hero-chip' : 'badge gray'}>
-                  {work ? 'Effort' : 'Repos'} · tour {phase.r + 1}/{circuit.rounds} · {phase.i + 1}/{circuit.keys.length}
+                  {warm ? `${work ? 'Mouvement' : 'Change'} · ${phase.i + 1}/${circuit.keys.length}` : `${work ? 'Effort' : 'Repos'} · tour ${phase.r + 1}/${circuit.rounds} · ${phase.i + 1}/${circuit.keys.length}`}
                 </span>
                 <span style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em' }}>{work ? phase.label : `Ensuite : ${phase.label}`}</span>
+                {warm && WARMUP_CUES[phase.key] && <span className={'small ' + (work ? 'on-hero-2' : 'muted')} style={{ maxWidth: 300, lineHeight: 1.4 }}>{WARMUP_CUES[phase.key]}</span>}
                 <Ring
                   value={Math.max(0, (acc + phase.dur - elapsed) / phase.dur)}
                   size={180}

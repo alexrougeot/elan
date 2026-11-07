@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { getData, getDoc, putDoc, uid } from './store';
 import { dayKey, daysBetween, parseDay, weekday } from './dates';
-import { CATALOG, weeklyCircuit, type Program, type ProgramDay } from './program';
+import { CATALOG, warmupFor, weeklyCircuit, type Program, type ProgramDay } from './program';
 import { focusMuscles, groupOf } from './analysis';
 import { bestE1rm, e1rm, isDeloadWeek, prepareExercise, sessions, type Session } from './coach';
 import { beep } from './device';
@@ -122,6 +122,10 @@ export async function startSession(day: ProgramDay, program: Program, readiness:
     }
     return ex;
   });
+  // échauffement de 5 minutes, ciblé sur les muscles du jour
+  const warm = prepareExercise({ key: 'warmup', sets: 1, min: 1, max: 1, rest: 0, circuit: warmupFor(day.exercises) }, deload, id);
+  warm.tip = { kind: 'same', text: 'Cinq minutes pour préparer les muscles du jour. Ensuite, les séries d’approche sur le premier gros exercice.' };
+  exercises.unshift(warm);
   const s: Session = {
     date: dayKey(),
     dayId: day.id,
