@@ -58,7 +58,7 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('db_row', 'Rowing haltère', 'Dos', 'haltères', false, true, ['cable_row', 'row', 'machine_row'], { perSide: true }),
     ex('cable_row', 'Rowing assis poulie', 'Dos', 'poulie', false, true, ['db_row', 'machine_row']),
     ex('machine_row', 'Rowing machine', 'Dos', 'machine', false, true, ['cable_row', 'db_row']),
-    ex('pullup', 'Tractions', 'Dos', 'poids du corps', false, true, ['lat_pulldown', 'assisted_pullup']),
+    ex('pullup', 'Tractions', 'Dos', 'poids du corps', false, true, ['lat_pulldown', 'assisted_pullup'], { increment: 0 }),
     ex('assisted_pullup', 'Tractions assistées', 'Dos', 'machine', false, true, ['pullup', 'lat_pulldown']),
     ex('lat_pulldown', 'Tirage vertical', 'Dos', 'poulie', false, true, ['pullup', 'assisted_pullup']),
     ex('ohp', 'Développé militaire', 'Épaules', 'barre', false, true, ['db_ohp', 'machine_shoulder']),
@@ -74,7 +74,7 @@ export const CATALOG: Record<string, ExerciseDef> = Object.fromEntries(
     ex('triceps', 'Extension triceps poulie', 'Triceps', 'poulie', false, false, ['skullcrusher', 'dips'], { increment: 2.5 }),
     ex('overhead_triceps', 'Extension triceps au-dessus de la tête', 'Triceps', 'poulie', false, false, ['triceps', 'skullcrusher']),
     ex('skullcrusher', 'Barre au front', 'Triceps', 'barre', false, false, ['triceps', 'overhead_triceps']),
-    ex('dips', 'Dips', 'Triceps', 'poids du corps', false, true, ['triceps', 'skullcrusher']),
+    ex('dips', 'Dips', 'Triceps', 'poids du corps', false, true, ['triceps', 'skullcrusher'], { increment: 0 }),
     // Bas du corps
     ex('squat', 'Squat', 'Quadriceps', 'barre', true, true, ['hack_squat', 'leg_press', 'goblet_squat']),
     ex('hack_squat', 'Hack squat', 'Quadriceps', 'machine', true, true, ['squat', 'leg_press']),
@@ -301,10 +301,17 @@ export const ABS_POOL: string[][] = [
  * Circuit de la séance : il change chaque semaine, et le temps d'effort monte par paliers
  * (40/20 → 45/15 → 50/10), toujours 10 minutes. Semaine légère : 30/30.
  */
-export function weeklyCircuit(base: Circuit, week: number, dayIndex: number, daysPerWeek: number, deload: boolean): Circuit & { number: number } {
+export function weeklyCircuit(base: Circuit, week: number, dayIndex: number, daysPerWeek: number, deload: boolean, shortRest = false): Circuit & { number: number } {
   const n = ((week * Math.max(1, daysPerWeek) + dayIndex) % ABS_POOL.length + ABS_POOL.length) % ABS_POOL.length;
   const step = Math.floor((((week % 6) + 6) % 6) / 2);
-  const [work, rest] = deload ? [30, 30] : ([[40, 20], [45, 15], [50, 10]] as const)[step];
+  // repos court (10 s) : l'effort monte toutes les 2 semaines, le repos reste à 10 s
+  const [work, rest] = shortRest
+    ? deload
+      ? [30, 10]
+      : ([[40, 10], [45, 10], [50, 10]] as const)[step]
+    : deload
+      ? [30, 30]
+      : ([[40, 20], [45, 15], [50, 10]] as const)[step];
   return { ...base, keys: ABS_POOL[n], work, rest, number: n + 1 };
 }
 
@@ -314,8 +321,11 @@ export const abs = (keys: string[]): PlannedExercise => ({
   min: 2,
   max: 2,
   rest: 0,
-  circuit: { keys, work: 40, rest: 20, rounds: 2 },
+  circuit: { keys, work: 40, rest: 10, rounds: 2 },
 });
+
+/** Exercice au poids du corps (tractions, dips, pompes…) : charge 0 = sans lest */
+export const isBodyweight = (key: string) => CATALOG[key]?.equipment === 'poids du corps' && !CATALOG[key]?.timed && !CATALOG[key]?.circuit;
 
 export const PROGRAM_VERSION = 4;
 

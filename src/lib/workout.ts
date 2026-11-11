@@ -92,7 +92,8 @@ export async function startSession(day: ProgramDay, program: Program, readiness:
       // le circuit abdos change chaque semaine
       const week = Math.max(0, Math.floor(daysBetween(program.startDate, dayKey()) / 7));
       const dayIndex = Math.max(0, program.days.findIndex((d) => d.id === day.id));
-      const c = weeklyCircuit(p.circuit, week, dayIndex, program.days.length, deload);
+      // abdos : 10 s de repos (programme homme) ; le programme femme garde la progression 20 → 15 → 10 s
+      const c = weeklyCircuit(p.circuit, week, dayIndex, program.days.length, deload, program.audience !== 'f');
       return prepareExercise({ ...p, circuit: c }, deload, id);
     }
     const def = CATALOG[p.key];

@@ -3,7 +3,7 @@ import { allOf, getData } from './store';
 import { addDays, dayKey, daysBetween, fmtKg, weekStart } from './dates';
 import { weighIns, weekAvg, type Profile } from './nutrition';
 import { e1rm, sessions } from './coach';
-import { CATALOG, exName, type Program } from './program';
+import { CATALOG, exName, isBodyweight, type Program } from './program';
 import { activities, chrono, circuitScore, durationSec, paceText, runs, type Activity } from './activity';
 import type { CircuitFormat } from './conditioning';
 import type { HealthEntry } from './health';
@@ -206,6 +206,19 @@ function strengthGroup(): RecGroup | null {
     const b = best.get(k)!;
     items.push({ key: 'f:' + k, label: exName(k), text: `${Math.round(b.v)} kg max estimé`, date: b.date, sub: `meilleure série : ${fmtKg(b.w, b.w % 1 ? 1 : 0)} kg × ${b.r}`, beat: b.date > (firstOf.get(k) ?? b.date) });
   }
+  // poids du corps sans lest (tractions, dips…) : le plus de reps en une série
+  const reps = new Map<string, { r: number; date: string; first: string }>();
+  for (const s of [...done].reverse())
+    for (const e of s.data.exercises) {
+      if (!isBodyweight(e.key) || best.has(e.key)) continue;
+      for (const x of e.sets) {
+        if (!x.done || x.w > 0) continue;
+        const cur = reps.get(e.key);
+        if (!cur) reps.set(e.key, { r: x.r, date: s.data.date, first: s.data.date });
+        else if (x.r > cur.r) reps.set(e.key, { ...cur, r: x.r, date: s.data.date });
+      }
+    }
+  for (const [k, b] of reps) items.push({ key: 'f:' + k, label: exName(k), text: `${b.r} reps`, date: b.date, sub: 'meilleure série, au poids du corps', beat: b.date > b.first });
   return { title: 'Musculation', icon: 'dumbbell', items };
 }
 

@@ -100,6 +100,8 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
   const hist = historyFor(planned.key, excludeId);
   const sets = deload ? Math.max(2, planned.sets - 1) : planned.sets;
   const timed = !!def?.timed;
+  // poids du corps sans lest : on progresse en reps, sans plafond
+  const bw = def?.equipment === 'poids du corps' && !timed && (def?.increment ?? 1) === 0;
 
   if (hist.length === 0) {
     return {
@@ -110,7 +112,9 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
         kind: 'new',
         text: timed
           ? `Première fois : tiens entre ${planned.min} et ${planned.max} secondes.`
-          : 'Première fois : choisis une charge qui te laisse 1 ou 2 reps en réserve. Je m’en sers ensuite pour la suite.',
+          : bw
+            ? `Première fois : au poids du corps, fais le maximum de reps propres (vise ${planned.min} à ${planned.max}).`
+            : 'Première fois : choisis une charge qui te laisse 1 ou 2 reps en réserve. Je m’en sers ensuite pour la suite.',
       },
     };
   }
@@ -132,6 +136,16 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
     tip = allTop
       ? { kind: 'same', text: `Tu as tenu ${planned.max} s partout : passe à une variante plus dure ou garde ce temps.` }
       : { kind: 'same', text: 'Vise 5 secondes de plus que la dernière fois.' };
+  } else if (bw && top === 0) {
+    // sans lest : une rep de plus par série, même au-delà de la fourchette
+    reps = Array.from({ length: sets }, (_, i) => (lastReps[i] ?? lastReps[lastReps.length - 1] ?? planned.min) + 1);
+    if (fail && failBefore) reps = Array.from({ length: sets }, () => planned.min);
+    tip =
+      fail && failBefore
+        ? { kind: 'same', text: `Deux séances difficiles : vise ${planned.min} reps propres, avec toute l’amplitude.` }
+        : allTop
+          ? { kind: 'up', text: `${planned.max} reps partout : continue, une rep de plus par série.` }
+          : { kind: 'same', text: `Poids du corps : vise une rep de plus par série que la dernière fois.` };
   } else if (fail && failBefore) {
     w = roundLike(top, top * 0.9, step);
     reps = Array.from({ length: sets }, () => planned.min);
@@ -156,7 +170,9 @@ export function prepareExercise(planned: PlannedExercise, deload: boolean, exclu
 
   if (deload && !timed) {
     w = roundLike(w, w * 0.9, step);
-    tip = { kind: 'deload', text: `Semaine légère : ${sets} séries à ${fmtWeight(w)} kg, sans aller à l’échec. Ton corps récupère et repart plus fort.` };
+    // poids du corps : on allège par les reps (3 de moins)
+    if (bw && w === 0) reps = reps.map((r) => Math.max(1, r - 3));
+    tip = { kind: 'deload', text: `Semaine légère : ${sets} séries ${bw && w === 0 ? 'au poids du corps, en gardant 2 ou 3 reps en réserve' : `à ${fmtWeight(w)} kg, sans aller à l’échec`}. Ton corps récupère et repart plus fort.` };
   }
 
   return { key: planned.key, planned, sets: reps.map((r) => ({ w, r, done: false })), tip };

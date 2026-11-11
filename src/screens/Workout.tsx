@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tab } from '../App';
 import { getData, getDoc, putDoc, removeDoc, useStoreVersion } from '../lib/store';
 import { addDays, dayKey, fmtNum, fmtWeight, longDate, shortDate, WEEKDAYS } from '../lib/dates';
-import { CATALOG, defaultRest, estimateMinutes, exName, platesFor, WARMUP_CUES, type Circuit, type Program, type ProgramDay } from '../lib/program';
+import { CATALOG, defaultRest, estimateMinutes, exName, isBodyweight, platesFor, WARMUP_CUES, type Circuit, type Program, type ProgramDay } from '../lib/program';
 import { autoAdjust, bestE1rm, e1rm, historyFor, prepareExercise, sessions, type Session, type SessionExercise } from '../lib/coach';
 import { activeSession, adjustRest, getProgram, groupMembers, nextPending, planFor, sessionRecords, sessionStats, setRestSound, startRest, startSession, stopRest, updateSession, useRest, warmupsFor, type Readiness } from '../lib/workout';
 import { haptic, keepScreenOn, tone, unlockAudio } from '../lib/device';
@@ -657,8 +657,9 @@ function ExerciseCard({
               Dernière fois ({shortDate(last.date)}) :{' '}
               {last.ex.sets
                 .filter((x) => x.done)
-                .map((x) => (timed ? `${x.r} s` : `${fmtWeight(x.w)}×${x.r}`))
+                .map((x) => (timed ? `${x.r} s` : x.w === 0 && isBodyweight(ex.key) ? `${x.r}` : `${fmtWeight(x.w)}×${x.r}`))
                 .join(' · ')}
+              {!timed && isBodyweight(ex.key) && last.ex.sets.every((x) => !x.done || x.w === 0) ? ' reps' : ''}
             </div>
           )}
           <div className="row small" style={{ alignItems: 'flex-start', gap: 10, background: tipBg, color: tipColor, padding: '11px 13px', borderRadius: 14, lineHeight: 1.4 }}>
@@ -700,7 +701,7 @@ function ExerciseCard({
                 </button>
               </div>
             ))}
-            {warm.length === 0 && ex.sets[0] && !ex.sets[0].done && ex.sets[0].w === 0 && def?.compound && !def.timed && (
+            {warm.length === 0 && ex.sets[0] && !ex.sets[0].done && ex.sets[0].w === 0 && def?.compound && !def.timed && !isBodyweight(ex.key) && (
               <div className="tiny" style={{ color: 'var(--sky-ink)', padding: '0 8px' }}>
                 Échauffement : 2 séries légères (barre ou charge légère, puis la moitié de ta charge). Dès que tu mets ta charge, Élan les calcule.
               </div>
@@ -714,8 +715,19 @@ function ExerciseCard({
                     <span />
                   ) : (
                     <button className="set-val press" onClick={() => onEdit(sj)} aria-label={`Charge de la série ${sj + 1}`}>
-                      {x.w > 0 ? fmtWeight(x.w) : '—'}
-                      <small>kg</small>
+                      {x.w > 0 ? (
+                        <>
+                          {isBodyweight(ex.key) ? '+' : ''}
+                          {fmtWeight(x.w)}
+                          <small>kg</small>
+                        </>
+                      ) : isBodyweight(ex.key) ? (
+                        <span style={{ fontSize: 15, fontWeight: 650, color: 'var(--ink2)' }}>Corps</span>
+                      ) : (
+                        <>
+                          —<small>kg</small>
+                        </>
+                      )}
                     </button>
                   )}
                   <button className="set-val press" onClick={() => onEdit(sj)} aria-label={`${timed ? 'Durée' : 'Reps'} de la série ${sj + 1}`}>
@@ -812,15 +824,18 @@ function SetEditor({ sid, session, edit, onClose }: { sid: string; session: Sess
   const ex = edit ? session.exercises[edit.ei] : undefined;
   const def = ex ? CATALOG[ex.key] : undefined;
   const timed = !!def?.timed;
+  const bw = ex ? isBodyweight(ex.key) : false;
   const [w, setW] = useState(0);
   const [r, setR] = useState(0);
   const [following, setFollowing] = useState(true);
+  const [lest, setLest] = useState(false);
 
   useEffect(() => {
     if (!edit || !ex) return;
     setW(ex.sets[edit.sj].w);
     setR(ex.sets[edit.sj].r);
     setFollowing(true);
+    setLest(ex.sets[edit.sj].w > 0);
   }, [edit?.ei, edit?.sj]);
 
   if (!ex || !edit) return <Sheet open={false} onClose={onClose} title="">{null}</Sheet>;
@@ -841,12 +856,23 @@ function SetEditor({ sid, session, edit, onClose }: { sid: string; session: Sess
 
   return (
     <Sheet open={!!edit} onClose={onClose} title={`${exName(ex.key)} · série ${edit.sj + 1}`}>
-      {!timed && (
+      {!timed && bw && !lest && (
+        <div className="row card" style={{ gap: 10, background: 'var(--card2)', boxShadow: 'none' }}>
+          <span className="grow col" style={{ gap: 1 }}>
+            <span style={{ fontWeight: 700 }}>Poids du corps</span>
+            <span className="small muted">Sans lest. Tu progresses en ajoutant des reps.</span>
+          </span>
+          <button className="btn small ghost press" style={{ width: 'auto' }} onClick={() => setLest(true)}>
+            Ajouter un lest
+          </button>
+        </div>
+      )}
+      {!timed && (!bw || lest) && (
         <div className="col" style={{ gap: 10 }}>
           <span className="small muted" style={{ fontWeight: 600 }}>
-            Charge{def?.equipment === 'haltères' ? ' par haltère' : ''}
+            {bw ? 'Lest (0 = poids du corps)' : `Charge${def?.equipment === 'haltères' ? ' par haltère' : ''}`}
           </span>
-          <Stepper value={w} onChange={setW} step={1} unit="kg" format={fmtWeight} typeable label="Charge en kilos" />
+          <Stepper value={w} onChange={setW} step={1} unit="kg" format={fmtWeight} typeable label={bw ? 'Lest en kilos' : 'Charge en kilos'} />
           <div className="row" style={{ gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
             {[-5, -2.5, 2.5, 5].map((d) => (
               <button key={d} className="chip press" onClick={() => setW(Math.max(0, Math.round((w + d) * 100) / 100))}>
